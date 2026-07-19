@@ -115,6 +115,32 @@ export async function fetchJobReport(id: number): Promise<ScoringReport> {
   return data;
 }
 
+// ─── Deep Review ───
+export interface DeepReview {
+  strengths: string[];
+  gaps: string[];
+  overall_fit: 'strong' | 'good' | 'maybe' | 'skip';
+  recommendation: string;
+  key_talking_points: string[];
+}
+
+export async function fetchJobReview(id: number): Promise<DeepReview> {
+  const { data } = await api.post(`/jobs/${id}/review`, {}, { timeout: 60000 });
+  return data;
+}
+
+// ─── Cover Letter ───
+export interface CoverLetter {
+  subject: string;
+  body: string;
+  tone: string;
+}
+
+export async function fetchCoverLetter(id: number): Promise<CoverLetter> {
+  const { data } = await api.post(`/jobs/${id}/cover-letter`, {}, { timeout: 60000 });
+  return data;
+}
+
 // ─── Scrapers ───
 export interface Scraper {
   id: string;

@@ -21,7 +21,7 @@ import {
 import { scrapeYC } from "../scrapers/yc.js";
 import { scrapeLinkedIn } from "../scrapers/linkedin.js";
 import { scrapeCustom } from "../scrapers/custom.js";
-import { generateScoringReport } from "../agent/scorer.js";
+import { generateScoringReport, deepReview, generateCoverLetter } from "../agent/scorer.js";
 import { cfg } from "../config.js";
 
 const router = Router();
@@ -134,6 +134,75 @@ router.get("/api/jobs/:id/report", async (req: Request, res: Response) => {
   } catch (err) {
     console.error("GET /api/jobs/:id/report error:", err);
     res.status(500).json({ error: "Failed to generate scoring report" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Deep Review
+// ---------------------------------------------------------------------------
+
+router.post("/api/jobs/:id/review", async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      res.status(400).json({ error: "Invalid job id" });
+      return;
+    }
+
+    const job = await getJobById(id);
+    if (!job) {
+      res.status(404).json({ error: "Job not found" });
+      return;
+    }
+
+    const review = await deepReview({
+      title: job.title,
+      company: job.company,
+      description: job.description || "",
+      metadata: job.metadata as any,
+      scoringReport: job.scoring_report as any,
+      location: job.location,
+      salaryMin: job.salary_min,
+    });
+
+    res.json(review);
+  } catch (err) {
+    console.error("POST /api/jobs/:id/review error:", err);
+    res.status(500).json({ error: "Failed to generate review" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Cover Letter
+// ---------------------------------------------------------------------------
+
+router.post("/api/jobs/:id/cover-letter", async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      res.status(400).json({ error: "Invalid job id" });
+      return;
+    }
+
+    const job = await getJobById(id);
+    if (!job) {
+      res.status(404).json({ error: "Job not found" });
+      return;
+    }
+
+    const letter = await generateCoverLetter({
+      title: job.title,
+      company: job.company,
+      description: job.description || "",
+      metadata: job.metadata as any,
+      scoringReport: job.scoring_report as any,
+      location: job.location,
+    });
+
+    res.json(letter);
+  } catch (err) {
+    console.error("POST /api/jobs/:id/cover-letter error:", err);
+    res.status(500).json({ error: "Failed to generate cover letter" });
   }
 });
 
