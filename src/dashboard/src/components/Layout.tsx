@@ -7,6 +7,7 @@ import {
   Settings,
   History,
   BookOpen,
+  GraduationCap,
   Bot,
   Sun,
   Moon,
@@ -19,6 +20,7 @@ import { cn } from '@/lib/utils';
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/jobs', icon: Briefcase, label: 'Jobs' },
+  { to: '/level-up', icon: GraduationCap, label: 'Level Up' },
   { to: '/scout', icon: Radio, label: 'Scout' },
   { to: '/config', icon: Settings, label: 'Config' },
   { to: '/history', icon: History, label: 'History' },

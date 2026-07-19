@@ -481,3 +481,68 @@ export async function getAuditLogs(scoutRunId: number): Promise<Array<{
   );
   return result.rows;
 }
+
+// ---------------------------------------------------------------------------
+// Level Up — skills gap tracker
+// ---------------------------------------------------------------------------
+
+export interface LevelUpItem {
+  id: number;
+  skill_name: string;
+  category: string | null;
+  source_job_ids: number[] | null;
+  status: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getLevelUpItems(): Promise<LevelUpItem[]> {
+  const result = await pool.query("SELECT * FROM level_up_items ORDER BY status = 'to_learn' DESC, id ASC");
+  return result.rows;
+}
+
+export async function upsertLevelUpItem(
+  skillName: string,
+  category: string,
+  sourceJobId: number
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO level_up_items (skill_name, category, source_job_ids)
+     VALUES ($1, $2, ARRAY[$3])
+     ON CONFLICT (skill_name) DO UPDATE
+     SET source_job_ids = (
+       SELECT array_agg(DISTINCT x) FROM unnest(level_up_items.source_job_ids || ARRAY[$3]) AS x
+     ),
+     updated_at = NOW()`,
+    [skillName, category, sourceJobId]
+  );
+}
+
+export async function updateLevelUpItem(
+  id: number,
+  updates: { status?: string; notes?: string }
+): Promise<LevelUpItem | null> {
+  const setClauses: string[] = [];
+  const values: unknown[] = [];
+  let idx = 1;
+
+  if (updates.status !== undefined) {
+    setClauses.push(`status = $${idx++}`);
+    values.push(updates.status);
+  }
+  if (updates.notes !== undefined) {
+    setClauses.push(`notes = $${idx++}`);
+    values.push(updates.notes);
+  }
+
+  if (setClauses.length === 0) return null;
+  setClauses.push(`updated_at = NOW()`);
+  values.push(id);
+
+  const result = await pool.query(
+    `UPDATE level_up_items SET ${setClauses.join(", ")} WHERE id = $${idx} RETURNING *`,
+    values
+  );
+  return result.rows[0] || null;
+}

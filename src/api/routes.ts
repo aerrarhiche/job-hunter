@@ -17,6 +17,9 @@ import {
   getAuditLogs,
   createScoutRun,
   updateScoutRun,
+  getLevelUpItems,
+  upsertLevelUpItem,
+  updateLevelUpItem,
 } from "../db/client.js";
 import { scrapeYC } from "../scrapers/yc.js";
 import { scrapeLinkedIn } from "../scrapers/linkedin.js";
@@ -518,6 +521,128 @@ router.get("/api/audit-logs", async (req: Request, res: Response) => {
   } catch (err) {
     console.error("GET /api/audit-logs error:", err);
     res.status(500).json({ error: "Failed to fetch audit logs" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Level Up
+// ---------------------------------------------------------------------------
+
+router.get("/api/level-up", async (_req: Request, res: Response) => {
+  try {
+    const items = await getLevelUpItems();
+    res.json(items);
+  } catch (err) {
+    console.error("GET /api/level-up error:", err);
+    res.status(500).json({ error: "Failed to fetch level-up items" });
+  }
+});
+
+router.post("/api/level-up/generate", async (_req: Request, res: Response) => {
+  try {
+    const { deepReview } = await import("../agent/scorer.js");
+    const jobs = await getJobs({ minScore: 0, limit: 100 });
+    let generated = 0;
+
+    for (const job of jobs.jobs) {
+      const review = await deepReview({
+        title: job.title,
+        company: job.company,
+        description: job.description || "",
+        metadata: (job as any).metadata,
+        scoringReport: (job as any).scoring_report,
+        location: job.location,
+        salaryMin: (job as any).salary_min,
+      });
+
+      for (const gap of review.gaps) {
+        // Extract skill name from gap text
+        const skillMatch = gap.match(/\b(LangGraph|LangChain|Cursor|Codex|Go|Rust|Kafka|Kubernetes|GraphQL|gRPC|Redis|Docker|Firebase|React Native|Flutter|Vue|Svelte|Angular|Terraform|Ansible|Jenkins|CircleCI|Datadog|Sentry|Mixpanel|Amplitude|Figma|Sketch|Tailwind|Prisma|TypeORM|Sequelize|Django|Rails|Laravel|Spring|FastAPI|Flask|Node\.js|Express|Next\.js|Remix|Nuxt|Gatsby|Astro|Supabase|Vercel|Netlify|Cloudflare|Azure|GCP|AWS|MongoDB|PostgreSQL|MySQL|SQLite|DynamoDB|Cassandra|Elasticsearch|RabbitMQ|SQS|Kinesis|WebSocket|GraphQL|REST|SOAP|gRPC|OAuth|JWT|SAML|OpenID|HL7|FHIR|Mirth|PACS|RIS|DICOM)[A-Za-z.]*\b/i);
+        const skill = skillMatch ? skillMatch[0] : gap.substring(0, 80).replace(/^(No |Lack of |Missing )/i, "").trim();
+
+        const category = /framework|library|react|vue|angular|next/i.test(skill) ? "framework" :
+          /language|python|typescript|java|go|rust|swift|kotlin/i.test(skill) ? "language" :
+          /tool|cursor|codex|copilot|figma|docker|git/i.test(skill) ? "tool" :
+          /cloud|aws|azure|gcp|lambda|s3|ec2/i.test(skill) ? "cloud" : "concept";
+
+        await upsertLevelUpItem(skill, category, job.id);
+        generated++;
+      }
+    }
+
+    const items = await getLevelUpItems();
+    res.json({ generated, items });
+  } catch (err) {
+    console.error("POST /api/level-up/generate error:", err);
+    res.status(500).json({ error: "Failed to generate level-up items" });
+  }
+});
+
+router.put("/api/level-up/:id", async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+    const { status, notes } = req.body;
+    const item = await updateLevelUpItem(id, { status, notes });
+    if (!item) { res.status(404).json({ error: "Item not found" }); return; }
+    res.json(item);
+  } catch (err) {
+    console.error("PUT /api/level-up/:id error:", err);
+    res.status(500).json({ error: "Failed to update item" });
+  }
+});
+
+router.post("/api/level-up/suggest-resume", async (_req: Request, res: Response) => {
+  try {
+    const { loadResume, loadSoul } = await import("../config.js");
+    const resume = loadResume();
+    const soul = loadSoul();
+    const items = await getLevelUpItems();
+
+    const masteredSkills = items
+      .filter((i) => ["mastered", "some_experience", "competitor_mastery"].includes(i.status))
+      .map((i) => i.skill_name);
+
+    const learningSkills = items
+      .filter((i) => ["learning"].includes(i.status))
+      .map((i) => i.skill_name);
+
+    const OpenAI = (await import("openai")).default;
+    const { cfg: config } = await import("../config.js");
+    const client = new OpenAI({ apiKey: config.deepseek.apiKey, baseURL: config.deepseek.baseUrl });
+
+    const prompt = `You are a resume editor. Update the candidate's resume to reflect newly acquired skills.
+
+CURRENT RESUME:
+${resume}
+
+NEWLY MASTERED SKILLS (add these to Skills section and work into experience bullets where relevant):
+${masteredSkills.join(", ") || "None"}
+
+CURRENTLY LEARNING (add a "Learning" note if appropriate, or skip):
+${learningSkills.join(", ") || "None"}
+
+RULES:
+1. Add mastered skills to the Skills section
+2. Reword experience bullets to mention these skills where they naturally fit
+3. NEVER invent experience — only adjust the skills list and wording
+4. Keep the same structure and all existing content
+5. Return the full resume in clean markdown
+
+Respond with ONLY the updated resume markdown — no JSON wrapper, no explanation.`;
+
+    const response = await client.chat.completions.create({
+      model: config.deepseek.model,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.3,
+      max_tokens: 3000,
+    });
+
+    const suggested = response.choices[0]?.message?.content || resume;
+    res.json({ suggested });
+  } catch (err) {
+    console.error("POST /api/level-up/suggest-resume error:", err);
+    res.status(500).json({ error: "Failed to generate resume suggestion" });
   }
 });
 

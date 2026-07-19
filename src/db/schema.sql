@@ -124,3 +124,18 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 CREATE INDEX IF NOT EXISTS idx_audit_run ON audit_logs(scout_run_id);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at);
+
+-- ============================================================
+-- LEVEL UP — skills to learn from job gap analysis
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS level_up_items (
+  id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  skill_name      TEXT NOT NULL UNIQUE,
+  category        TEXT,                  -- e.g. 'framework', 'language', 'tool', 'domain'
+  source_job_ids  BIGINT[],              -- which jobs flagged this gap
+  status          TEXT DEFAULT 'to_learn', -- to_learn, learning, some_experience, competitor_mastery, mastered
+  notes           TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
