@@ -428,7 +428,7 @@ export async function generateCoverLetter(job: {
   }
   const extraContext = contextParts.length > 0 ? "\n\nADDITIONAL COMPANY CONTEXT:\n" + contextParts.join("\n") : "";
 
-  const prompt = `You are a professional cover letter writer. Write a compelling, concise cover letter for this specific job application.
+  const prompt = `You are a professional cover letter writer. Write a concise, honest cover letter for this job application. The tone should be professional and relaxed — confident but not over-eager.
 
 CANDIDATE RESUME:
 ${resume}
@@ -443,25 +443,25 @@ Description: ${job.description}${extraContext}
 
 RULES:
 1. Address it to "Hiring Team at ${job.company}"
-2. Open with enthusiasm for the company's mission — reference specific details from the job description or company context
-3. Highlight 2-3 specific experiences from the resume that directly match this role
-4. Keep it to 3-4 short paragraphs (250-350 words total)
-5. Professional but warm tone — not generic, not desperate
-6. Include a clear call to action at the end
-7. NEVER invent experience not in the resume
-8. Use markdown formatting
+2. Open by stating the role you're applying for and briefly why you're interested — reference the company's product/mission ONLY using facts from the job description or company context provided above. Do NOT claim to have followed the company, admired their work for a long time, or tracked their journey. You just came across this listing.
+3. Highlight 2-3 specific experiences from the resume that directly match this role. Keep it factual.
+4. Keep it to 3-4 short paragraphs (200-300 words total). Be direct.
+5. Professional, relaxed tone — confident without enthusiasm. No exclamation marks. No words like "love", "passionate", "thrilled", "excited", "resonates deeply", "dream role".
+6. Include a simple call to action at the end.
+7. NEVER invent experience not in the resume. NEVER claim to know the company or its founders personally.
+8. Use markdown formatting.
 
 Respond with ONLY a JSON object:
 {
   "subject": "<email subject line>",
   "body": "<full cover letter in markdown>",
-  "tone": "<one word describing the tone: professional, warm, enthusiastic, etc.>"
+  "tone": "professional"
 }`;
 
   const response = await client.chat.completions.create({
     model: cfg.deepseek.model,
     messages: [{ role: "user", content: prompt }],
-    temperature: 0.6,
+    temperature: 0.3,
     max_tokens: 1500,
   });
 
