@@ -171,6 +171,27 @@ export async function updateLevelUpItem(
   return data;
 }
 
+export interface SkillAnalysis {
+  interpretation: string;
+  verdict: 'knows_it' | 'learning' | 'knows_competitor' | 'doesnt_know';
+  suggested_edits: Array<{
+    file: string;
+    section: string;
+    old: string;
+    new: string;
+  }>;
+  explanation: string;
+}
+
+export async function analyzeLevelUpSkill(id: number, userInput: string): Promise<SkillAnalysis> {
+  const { data } = await api.post(`/level-up/${id}/analyze`, { userInput }, { timeout: 60000 });
+  return data;
+}
+
+export async function resolveLevelUpItem(id: number): Promise<void> {
+  await api.post(`/level-up/${id}/resolve`);
+}
+
 export async function suggestResume(): Promise<{ suggested: string }> {
   const { data } = await api.post('/level-up/suggest-resume', {}, { timeout: 60000 });
   return data;

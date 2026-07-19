@@ -509,10 +509,10 @@ export async function upsertLevelUpItem(
 ): Promise<void> {
   await pool.query(
     `INSERT INTO level_up_items (skill_name, category, source_job_ids)
-     VALUES ($1, $2, ARRAY[$3])
+     VALUES ($1, $2, ARRAY[$3::bigint])
      ON CONFLICT (skill_name) DO UPDATE
      SET source_job_ids = (
-       SELECT array_agg(DISTINCT x) FROM unnest(level_up_items.source_job_ids || ARRAY[$3]) AS x
+       SELECT array_agg(DISTINCT x) FROM unnest(level_up_items.source_job_ids || ARRAY[$3::bigint]) AS x
      ),
      updated_at = NOW()`,
     [skillName, category, sourceJobId]
