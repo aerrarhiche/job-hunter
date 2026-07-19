@@ -157,21 +157,21 @@ export default function ScoutPage() {
 
       {/* Live feed */}
       {activeRunId && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-950 overflow-hidden">
+        <div className="rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-900 dark:bg-slate-950 overflow-hidden shadow-lg">
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-800 bg-slate-900">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-700 dark:border-slate-800 bg-slate-800 dark:bg-slate-900">
             <div className="flex items-center gap-2">
               <Activity className={`h-3.5 w-3.5 ${isRunActive ? 'text-cyan-400 animate-pulse' : 'text-green-400'}`} />
-              <span className="text-xs font-mono text-slate-300">Run #{activeRunId}</span>
+              <span className="text-xs font-mono text-slate-200">Run #{activeRunId}</span>
               {isRunActive && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-900/50 text-cyan-400 animate-pulse">
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 animate-pulse">
                   LIVE
                 </span>
               )}
             </div>
             <button
               onClick={() => setActiveRunId(null)}
-              className="text-xs text-slate-500 hover:text-slate-300"
+              className="text-xs text-slate-400 hover:text-slate-200 transition-colors"
             >
               Clear
             </button>
@@ -180,7 +180,7 @@ export default function ScoutPage() {
           {/* Log lines */}
           <div className="p-4 max-h-96 overflow-y-auto font-mono text-xs leading-relaxed space-y-1">
             {!logs || logs.length === 0 ? (
-              <p className="text-slate-600 animate-pulse">Waiting for pipeline to start...</p>
+              <p className="text-slate-500 animate-pulse">Waiting for pipeline to start...</p>
             ) : (
               logs.map((log) => (
                 <LogLine key={log.id} log={log} />
@@ -206,7 +206,7 @@ function LogLine({ log }: { log: AuditLog }) {
       <Loader2 className="h-3 w-3 text-cyan-400 animate-spin shrink-0" />
     );
 
-  const color =
+  const msgColor =
     log.status === 'completed'
       ? 'text-green-400'
       : log.status === 'failed'
@@ -216,9 +216,9 @@ function LogLine({ log }: { log: AuditLog }) {
   return (
     <div className="flex items-start gap-2">
       {icon}
-      <span className="text-slate-500 shrink-0 w-20 text-right font-mono">{fmtTime(log.created_at)}</span>
-      <span className="text-slate-600">[{log.step}]</span>
-      <span className={color}>{log.message}</span>
+      <span className="text-slate-400 shrink-0 w-24 text-right font-mono">{fmtTime(log.created_at)}</span>
+      <span className="text-slate-500">[{log.step}]</span>
+      <span className={msgColor}>{log.message}</span>
     </div>
   );
 }

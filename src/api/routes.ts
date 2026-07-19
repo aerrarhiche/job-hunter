@@ -21,6 +21,7 @@ import {
 import { scrapeYC } from "../scrapers/yc.js";
 import { scrapeLinkedIn } from "../scrapers/linkedin.js";
 import { scrapeCustom } from "../scrapers/custom.js";
+import { generateScoringReport } from "../agent/scorer.js";
 import { cfg } from "../config.js";
 
 const router = Router();
@@ -92,6 +93,47 @@ router.get("/api/jobs/:id", async (req: Request, res: Response) => {
   } catch (err) {
     console.error("GET /api/jobs/:id error:", err);
     res.status(500).json({ error: "Failed to fetch job" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Scoring Report
+// ---------------------------------------------------------------------------
+
+router.get("/api/jobs/:id/report", async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      res.status(400).json({ error: "Invalid job id" });
+      return;
+    }
+
+    const job = await getJobById(id);
+    if (!job) {
+      res.status(404).json({ error: "Job not found" });
+      return;
+    }
+
+    // Return stored report if available (instant), otherwise generate fresh
+    if (job.scoring_report) {
+      res.json(job.scoring_report);
+      return;
+    }
+
+    const report = await generateScoringReport({
+      title: job.title,
+      company: job.company,
+      description: job.description || "",
+      metadata: job.metadata as any,
+      salaryMin: job.salary_min,
+      salaryMax: job.salary_max,
+      location: job.location,
+    });
+
+    res.json(report);
+  } catch (err) {
+    console.error("GET /api/jobs/:id/report error:", err);
+    res.status(500).json({ error: "Failed to generate scoring report" });
   }
 });
 

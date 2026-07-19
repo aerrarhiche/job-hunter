@@ -5,6 +5,7 @@ import { ToastProvider } from '@/components/ui/toast';
 import Layout from '@/components/Layout';
 import Dashboard from '@/pages/Dashboard';
 import JobsPage from '@/pages/JobsPage';
+import JobDetailPage from '@/pages/JobDetailPage';
 import ScoutPage from '@/pages/ScoutPage';
 import ConfigPage from '@/pages/ConfigPage';
 import HistoryPage from '@/pages/HistoryPage';
@@ -30,6 +31,7 @@ export default function App() {
               <Route element={<Layout />}>
                 <Route index element={<Dashboard />} />
                 <Route path="jobs" element={<JobsPage />} />
+                                <Route path="jobs/:id" element={<JobDetailPage />} />
                 <Route path="scout" element={<ScoutPage />} />
                 <Route path="config" element={<ConfigPage />} />
                 <Route path="history" element={<HistoryPage />} />

@@ -14,8 +14,21 @@ CREATE TABLE IF NOT EXISTS jobs (
   score         INTEGER,               -- 0-100 match against resume
   score_reason  TEXT,                  -- one-line explanation
   scraped_on    DATE NOT NULL DEFAULT CURRENT_DATE,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  metadata      JSONB,                 -- structured scraper data (equity, tags, flow, etc.)
+  scoring_report JSONB                -- full DeepSeek scoring report (categories + summary)
 );
+
+-- Add metadata column if missing
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='jobs' AND column_name='metadata') THEN
+    ALTER TABLE jobs ADD COLUMN metadata JSONB;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='jobs' AND column_name='scoring_report') THEN
+    ALTER TABLE jobs ADD COLUMN scoring_report JSONB;
+  END IF;
+END $$;
 
 -- Add status column for tracking job decisions
 DO $$
