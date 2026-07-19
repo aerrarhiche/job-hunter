@@ -297,9 +297,10 @@ Respond with ONLY a JSON object: {"tailored": "<full tailored resume in markdown
 export interface DeepReview {
   strengths: string[];
   gaps: string[];
-  overall_fit: string; // "strong" | "good" | "maybe" | "skip"
+  overall_fit: string;
   recommendation: string;
   key_talking_points: string[];
+  skills_to_learn?: Array<{ name: string; category: string }>;
 }
 
 export async function deepReview(job: {
@@ -358,6 +359,7 @@ YOUR TASK:
 3. Give an overall fit: "strong" (great match, apply now), "good" (solid fit, apply), "maybe" (borderline, apply if interested), "skip" (poor fit, don't waste time).
 4. Write a 2-3 sentence recommendation.
 5. List 3-5 key talking points the candidate should emphasize in an interview.
+6. List specific skills/tools/concepts the candidate is missing and should learn to be a 100% fit. Each entry needs a name and a category (framework, language, tool, cloud, concept). Be specific — use canonical names like "LangGraph", "Kubernetes", "GraphQL", "Azure", "React Native". Deduplicate — if multiple gaps refer to the same skill, list it once.
 
 IMPORTANT: Be honest and critical. If the candidate doesn't have the required experience, say so. Don't sugar-coat. The resume is the source of truth — don't assume skills that aren't listed.
 
@@ -367,7 +369,10 @@ Respond with ONLY a JSON object:
   "gaps": ["<specific gap 1>", "<specific gap 2>", ...],
   "overall_fit": "<strong|good|maybe|skip>",
   "recommendation": "<2-3 sentence honest recommendation>",
-  "key_talking_points": ["<point 1>", "<point 2>", ...]
+  "key_talking_points": ["<point 1>", "<point 2>", ...],
+  "skills_to_learn": [
+    {"name": "<canonical skill name>", "category": "<framework|language|tool|cloud|concept>"}
+  ]
 }`;
 
   const response = await client.chat.completions.create({

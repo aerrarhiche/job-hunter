@@ -555,17 +555,9 @@ router.post("/api/level-up/generate", async (_req: Request, res: Response) => {
         salaryMin: (job as any).salary_min,
       });
 
-      for (const gap of review.gaps) {
-        // Extract skill name from gap text
-        const skillMatch = gap.match(/\b(LangGraph|LangChain|Cursor|Codex|Go|Rust|Kafka|Kubernetes|GraphQL|gRPC|Redis|Docker|Firebase|React Native|Flutter|Vue|Svelte|Angular|Terraform|Ansible|Jenkins|CircleCI|Datadog|Sentry|Mixpanel|Amplitude|Figma|Sketch|Tailwind|Prisma|TypeORM|Sequelize|Django|Rails|Laravel|Spring|FastAPI|Flask|Node\.js|Express|Next\.js|Remix|Nuxt|Gatsby|Astro|Supabase|Vercel|Netlify|Cloudflare|Azure|GCP|AWS|MongoDB|PostgreSQL|MySQL|SQLite|DynamoDB|Cassandra|Elasticsearch|RabbitMQ|SQS|Kinesis|WebSocket|GraphQL|REST|SOAP|gRPC|OAuth|JWT|SAML|OpenID|HL7|FHIR|Mirth|PACS|RIS|DICOM)[A-Za-z.]*\b/i);
-        const skill = skillMatch ? skillMatch[0] : gap.substring(0, 80).replace(/^(No |Lack of |Missing )/i, "").trim();
-
-        const category = /framework|library|react|vue|angular|next/i.test(skill) ? "framework" :
-          /language|python|typescript|java|go|rust|swift|kotlin/i.test(skill) ? "language" :
-          /tool|cursor|codex|copilot|figma|docker|git/i.test(skill) ? "tool" :
-          /cloud|aws|azure|gcp|lambda|s3|ec2/i.test(skill) ? "cloud" : "concept";
-
-        await upsertLevelUpItem(skill, category, job.id);
+      for (const skill of (review.skills_to_learn || [])) {
+        if (!skill.name || skill.name.length < 2) continue;
+        await upsertLevelUpItem(skill.name, skill.category || "concept", Number(job.id));
         generated++;
       }
     }
@@ -582,13 +574,95 @@ router.put("/api/level-up/:id", async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
-    const { status, notes } = req.body;
-    const item = await updateLevelUpItem(id, { status, notes });
+    const { notes } = req.body;
+    const item = await updateLevelUpItem(id, { notes });
     if (!item) { res.status(404).json({ error: "Item not found" }); return; }
     res.json(item);
   } catch (err) {
     console.error("PUT /api/level-up/:id error:", err);
     res.status(500).json({ error: "Failed to update item" });
+  }
+});
+
+// Analyze what the user said about a skill and suggest resume edits
+router.post("/api/level-up/:id/analyze", async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+    const { userInput } = req.body;
+    if (!userInput) { res.status(400).json({ error: "userInput is required" }); return; }
+
+    const items = await getLevelUpItems();
+    const item = items.find((i) => Number(i.id) === id);
+    if (!item) { res.status(404).json({ error: "Item not found" }); return; }
+
+    const { loadResume, loadSoul, cfg: config } = await import("../config.js");
+    const resume = loadResume();
+    const soul = loadSoul();
+    const OpenAI = (await import("openai")).default;
+    const client = new OpenAI({ apiKey: config.deepseek.apiKey, baseURL: config.deepseek.baseUrl });
+
+    const prompt = `You are a resume editor. A candidate has a skill gap: "${item.skill_name}". They wrote about their experience:
+
+"${userInput}"
+
+Analyze what they're telling you and suggest specific edits to their resume or preferences.
+
+CURRENT RESUME:
+${resume}
+
+CURRENT PREFERENCES:
+${soul}
+
+RULES:
+1. Determine if they already know this skill, are learning it, know a competitor, or don't know it.
+2. If they know it or a competitor: suggest exactly which lines to add/modify in the resume Skills section and which experience bullets to update. Show the old text and the new text.
+3. If they're learning it: suggest adding it with a "(learning)" tag.
+4. If they don't know it: tell them honestly that they should learn it first.
+5. NEVER invent experience. Only add skills they explicitly claim.
+6. Be specific — quote exact lines from the resume to modify.
+
+Respond with ONLY a JSON object:
+{
+  "interpretation": "<what the user is telling you in 1 sentence>",
+  "verdict": "<knows_it | learning | knows_competitor | doesnt_know>",
+  "suggested_edits": [
+    {
+      "file": "<master.md or soul.md>",
+      "section": "<Skills or Experience or Preferences>",
+      "old": "<exact text to replace, or 'ADD' if new>",
+      "new": "<replacement text>"
+    }
+  ],
+  "explanation": "<1-2 sentence explanation of what these edits do>"
+}`;
+
+    const response = await client.chat.completions.create({
+      model: config.deepseek.model,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.4,
+      max_tokens: 2000,
+    });
+
+    const content = response.choices[0]?.message?.content || "{}";
+    res.json(JSON.parse(content.trim()));
+  } catch (err) {
+    console.error("POST /api/level-up/:id/analyze error:", err);
+    res.status(500).json({ error: "Failed to analyze" });
+  }
+});
+
+// Mark item as resolved and dismiss it
+router.post("/api/level-up/:id/resolve", async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+    await updateLevelUpItem(id, { status: "mastered" });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("POST /api/level-up/:id/resolve error:", err);
+    res.status(500).json({ error: "Failed to resolve" });
   }
 });
 
