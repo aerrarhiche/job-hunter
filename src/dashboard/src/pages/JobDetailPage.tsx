@@ -1,6 +1,6 @@
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchJob, fetchJobReport, decideJob, ScoringReportCategory } from '@/lib/api';
+import { fetchJob, fetchJobReport, fetchJobReview, fetchCoverLetter, decideJob, ScoringReportCategory, DeepReview, CoverLetter } from '@/lib/api';
 import { cn, formatDate, statusLabel } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -23,7 +23,14 @@ import {
   Globe,
   Clock,
   Search,
+  FileText,
+  Eye,
+  ThumbsUp,
+  ThumbsDown,
+  Minus,
+  MessageSquare,
 } from 'lucide-react';
+import { useState } from 'react';
 
 export default function JobDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -61,6 +68,44 @@ export default function JobDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['stats'] });
     } catch {
       toast({ title: 'Failed to update job', variant: 'error' });
+    }
+  };
+
+  // ── Review state ────────────────────────────────────────────
+  const [review, setReview] = useState<DeepReview | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewError, setReviewError] = useState(false);
+
+  const handleReview = async () => {
+    setReviewLoading(true);
+    setReviewError(false);
+    setReview(null);
+    try {
+      const r = await fetchJobReview(jobId);
+      setReview(r);
+    } catch {
+      setReviewError(true);
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  // ── Cover letter state ──────────────────────────────────────
+  const [coverLetter, setCoverLetter] = useState<CoverLetter | null>(null);
+  const [coverLoading, setCoverLoading] = useState(false);
+  const [coverError, setCoverError] = useState(false);
+
+  const handleCoverLetter = async () => {
+    setCoverLoading(true);
+    setCoverError(false);
+    setCoverLetter(null);
+    try {
+      const c = await fetchCoverLetter(jobId);
+      setCoverLetter(c);
+    } catch {
+      setCoverError(true);
+    } finally {
+      setCoverLoading(false);
     }
   };
 
@@ -215,7 +260,7 @@ export default function JobDetailPage() {
       </div>
 
       {/* ── Action Buttons ── */}
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-3">
         <Button onClick={() => handleDecide('applied')} className="gap-2">
           <CheckCircle className="h-4 w-4" /> Mark Applied
         </Button>
@@ -225,7 +270,124 @@ export default function JobDetailPage() {
         <Button variant="ghost" onClick={() => handleDecide('not_a_fit')} className="gap-2 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950">
           <XCircle className="h-4 w-4" /> Not a Fit
         </Button>
+        <div className="w-px h-8 bg-slate-200 dark:bg-slate-700 self-center" />
+        <Button
+          variant="outline"
+          onClick={handleReview}
+          disabled={reviewLoading}
+          className="gap-2 border-purple-300 dark:border-purple-700 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950"
+        >
+          {reviewLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
+          Resume-Weighted Review
+        </Button>
+        <Button
+          variant="outline"
+          onClick={handleCoverLetter}
+          disabled={coverLoading}
+          className="gap-2 border-amber-300 dark:border-amber-700 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950"
+        >
+          {coverLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+          Generate Cover Letter
+        </Button>
       </div>
+
+      {/* ── Review Result ── */}
+      {review && (
+        <section>
+          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-3 flex items-center gap-2">
+            <Eye className="h-5 w-5 text-purple-500" />
+            Resume-Weighted Review
+          </h2>
+          <div className="rounded-xl border border-purple-200 dark:border-purple-800 bg-white dark:bg-slate-900 overflow-hidden">
+            {/* Overall fit */}
+            <div className="px-5 py-3 border-b border-purple-100 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/30 flex items-center gap-2">
+              {review.overall_fit === 'strong' ? <ThumbsUp className="h-4 w-4 text-emerald-500" /> :
+               review.overall_fit === 'good' ? <ThumbsUp className="h-4 w-4 text-cyan-500" /> :
+               review.overall_fit === 'maybe' ? <Minus className="h-4 w-4 text-yellow-500" /> :
+               <ThumbsDown className="h-4 w-4 text-red-500" />}
+              <span className="text-sm font-semibold capitalize" style={{
+                color: review.overall_fit === 'strong' ? '#059669' :
+                       review.overall_fit === 'good' ? '#0891b2' :
+                       review.overall_fit === 'maybe' ? '#ca8a04' : '#dc2626'
+              }}>
+                {review.overall_fit}
+              </span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">overall fit</span>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">{review.recommendation}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <h4 className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide mb-2">Strengths</h4>
+                  <ul className="space-y-1.5">
+                    {review.strengths.map((s, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-slate-600 dark:text-slate-400">
+                        <CheckCircle className="h-3.5 w-3.5 text-emerald-500 mt-0.5 shrink-0" />
+                        {s}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide mb-2">Gaps</h4>
+                  <ul className="space-y-1.5">
+                    {review.gaps.map((g, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm text-slate-600 dark:text-slate-400">
+                        <AlertTriangle className="h-3.5 w-3.5 text-red-500 mt-0.5 shrink-0" />
+                        {g}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+              <div>
+                <h4 className="text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wide mb-2">Key Talking Points</h4>
+                <ul className="space-y-1.5">
+                  {review.key_talking_points.map((p, i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm text-slate-600 dark:text-slate-400">
+                      <MessageSquare className="h-3.5 w-3.5 text-purple-500 mt-0.5 shrink-0" />
+                      {p}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+      {reviewError && (
+        <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 p-4 flex items-center gap-3">
+          <AlertTriangle className="h-4 w-4 text-red-500" />
+          <p className="text-sm text-red-600 dark:text-red-400">Failed to generate review. Try again.</p>
+        </div>
+      )}
+
+      {/* ── Cover Letter Result ── */}
+      {coverLetter && (
+        <section>
+          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-3 flex items-center gap-2">
+            <FileText className="h-5 w-5 text-amber-500" />
+            Cover Letter
+            <span className="text-xs font-normal text-slate-400 ml-2">{coverLetter.tone} tone</span>
+          </h2>
+          <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-slate-900 overflow-hidden">
+            <div className="px-5 py-3 border-b border-amber-100 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30">
+              <span className="text-xs font-mono text-slate-500 dark:text-slate-400">Subject: {coverLetter.subject}</span>
+            </div>
+            <div className="p-5">
+              <div className="prose prose-sm max-w-none text-slate-600 dark:text-slate-400 leading-relaxed whitespace-pre-line">
+                {coverLetter.body}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+      {coverError && (
+        <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 p-4 flex items-center gap-3">
+          <AlertTriangle className="h-4 w-4 text-red-500" />
+          <p className="text-sm text-red-600 dark:text-red-400">Failed to generate cover letter. Try again.</p>
+        </div>
+      )}
 
       {/* ── Description ── */}
       <section>

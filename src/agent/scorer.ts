@@ -291,3 +291,179 @@ Respond with ONLY a JSON object: {"tailored": "<full tailored resume in markdown
     throw new Error("Failed to generate tailored resume");
   }
 }
+
+// ── Deep Review (on-demand, resume-weighted) ─────────────────────
+
+export interface DeepReview {
+  strengths: string[];
+  gaps: string[];
+  overall_fit: string; // "strong" | "good" | "maybe" | "skip"
+  recommendation: string;
+  key_talking_points: string[];
+}
+
+export async function deepReview(job: {
+  title: string;
+  company: string;
+  description: string;
+  metadata?: Record<string, unknown> | null;
+  scoringReport?: Record<string, unknown> | null;
+  location?: string | null;
+  salaryMin?: number | null;
+}): Promise<DeepReview> {
+  const resume = loadResume();
+  if (!resume) throw new Error("No resume loaded");
+
+  const soul = loadSoul();
+
+  // Build rich context
+  const contextParts: string[] = [];
+  contextParts.push(`JOB: ${job.title} at ${job.company}`);
+  if (job.location) contextParts.push(`Location: ${job.location}`);
+  if (job.salaryMin) contextParts.push(`Salary: $${(job.salaryMin / 1000).toFixed(0)}K+`);
+  contextParts.push(`\nDESCRIPTION:\n${job.description}`);
+
+  if (job.metadata) {
+    const m = job.metadata as any;
+    if (m.ycBatch) contextParts.push(`YC Batch: ${m.ycBatch}`);
+    if (m.companySize) contextParts.push(`Company Size: ${m.companySize}`);
+    if (m.companyDescription) contextParts.push(`\nABOUT COMPANY:\n${m.companyDescription}`);
+    if (m.roleDescription) contextParts.push(`\nABOUT ROLE:\n${m.roleDescription}`);
+    if (m.interviewProcess) contextParts.push(`\nINTERVIEW PROCESS:\n${m.interviewProcess}`);
+  }
+
+  if (job.scoringReport) {
+    const r = job.scoringReport as any;
+    contextParts.push(`\nAI SCORING REPORT:`);
+    contextParts.push(`Overall Score: ${r.overall_score}/100`);
+    contextParts.push(`Summary: ${r.summary}`);
+  }
+
+  const context = contextParts.join("\n");
+
+  const prompt = `You are a career coach and job fit analyst. Do a deep, honest review of whether this job is a good fit for the candidate's RESUME (primary weight) and PREFERENCES (secondary weight).
+
+RESUME (PRIMARY — weigh this most heavily):
+${resume}
+
+PREFERENCES (secondary):
+${soul}
+
+JOB CONTEXT:
+${context}
+
+YOUR TASK:
+1. Identify 3-5 specific strengths — where does the candidate's actual experience directly map to this role?
+2. Identify 2-4 specific gaps — what is the candidate clearly missing or weak on? Be honest, even if it hurts.
+3. Give an overall fit: "strong" (great match, apply now), "good" (solid fit, apply), "maybe" (borderline, apply if interested), "skip" (poor fit, don't waste time).
+4. Write a 2-3 sentence recommendation.
+5. List 3-5 key talking points the candidate should emphasize in an interview.
+
+IMPORTANT: Be honest and critical. If the candidate doesn't have the required experience, say so. Don't sugar-coat. The resume is the source of truth — don't assume skills that aren't listed.
+
+Respond with ONLY a JSON object:
+{
+  "strengths": ["<specific strength 1>", "<specific strength 2>", ...],
+  "gaps": ["<specific gap 1>", "<specific gap 2>", ...],
+  "overall_fit": "<strong|good|maybe|skip>",
+  "recommendation": "<2-3 sentence honest recommendation>",
+  "key_talking_points": ["<point 1>", "<point 2>", ...]
+}`;
+
+  const response = await client.chat.completions.create({
+    model: cfg.deepseek.model,
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0.4,
+    max_tokens: 1500,
+  });
+
+  try {
+    const content = response.choices[0]?.message?.content || "{}";
+    return JSON.parse(content.trim());
+  } catch {
+    return {
+      strengths: ["Unable to generate review"],
+      gaps: [],
+      overall_fit: "maybe",
+      recommendation: "Review generation failed. Please try again.",
+      key_talking_points: [],
+    };
+  }
+}
+
+// ── Cover Letter Generator (on-demand) ───────────────────────────
+
+export interface CoverLetter {
+  subject: string;
+  body: string;
+  tone: string;
+}
+
+export async function generateCoverLetter(job: {
+  title: string;
+  company: string;
+  description: string;
+  metadata?: Record<string, unknown> | null;
+  scoringReport?: Record<string, unknown> | null;
+  location?: string | null;
+}): Promise<CoverLetter> {
+  const resume = loadResume();
+  if (!resume) throw new Error("No resume loaded");
+
+  const soul = loadSoul();
+
+  // Build rich context for the letter
+  const contextParts: string[] = [];
+  if (job.metadata) {
+    const m = job.metadata as any;
+    if (m.companyDescription) contextParts.push(`About ${job.company}: ${m.companyDescription}`);
+    if (m.roleDescription) contextParts.push(`About the role: ${m.roleDescription}`);
+    if (m.companySize) contextParts.push(`Company size: ${m.companySize}`);
+    if (m.ycBatch) contextParts.push(`YC Batch: ${m.ycBatch}`);
+  }
+  const extraContext = contextParts.length > 0 ? "\n\nADDITIONAL COMPANY CONTEXT:\n" + contextParts.join("\n") : "";
+
+  const prompt = `You are a professional cover letter writer. Write a compelling, concise cover letter for this specific job application.
+
+CANDIDATE RESUME:
+${resume}
+
+CANDIDATE PREFERENCES:
+${soul}
+
+JOB:
+Title: ${job.title}
+Company: ${job.company}
+Description: ${job.description}${extraContext}
+
+RULES:
+1. Address it to "Hiring Team at ${job.company}"
+2. Open with enthusiasm for the company's mission — reference specific details from the job description or company context
+3. Highlight 2-3 specific experiences from the resume that directly match this role
+4. Keep it to 3-4 short paragraphs (250-350 words total)
+5. Professional but warm tone — not generic, not desperate
+6. Include a clear call to action at the end
+7. NEVER invent experience not in the resume
+8. Use markdown formatting
+
+Respond with ONLY a JSON object:
+{
+  "subject": "<email subject line>",
+  "body": "<full cover letter in markdown>",
+  "tone": "<one word describing the tone: professional, warm, enthusiastic, etc.>"
+}`;
+
+  const response = await client.chat.completions.create({
+    model: cfg.deepseek.model,
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0.6,
+    max_tokens: 1500,
+  });
+
+  try {
+    const content = response.choices[0]?.message?.content || "{}";
+    return JSON.parse(content.trim());
+  } catch {
+    throw new Error("Failed to generate cover letter");
+  }
+}
