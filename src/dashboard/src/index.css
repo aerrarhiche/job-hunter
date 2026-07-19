@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Light mode base */
+body {
+  font-family: var(--font-sans);
+  background-color: #f8fafc;
+  color: #1e293b;
+}
+
+.dark body {
+  background-color: #020617;
+  color: #e2e8f0;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+.dark ::-webkit-scrollbar-thumb { background: #334155; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+* {
+  border-color: #e2e8f0;
+}
+.dark * {
+  border-color: #1e293b;
+}
+
+/* Card surfaces */
+.card-surface {
+  background: white;
+  border: 1px solid #e2e8f0;
+}
+.dark .card-surface {
+  background: #0f172a;
+  border-color: #1e293b;
+}
+
+/* Toast animations */
+@keyframes toast-slide-in {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes toast-slide-out {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(100%); opacity: 0; }
+}
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.animate-toast-in { animation: toast-slide-in 0.2s ease-out; }
+.animate-toast-out { animation: toast-slide-out 0.2s ease-in; }
