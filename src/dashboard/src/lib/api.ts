@@ -41,6 +41,16 @@ export interface Job {
   date: string;
   status: string;
   url?: string;
+  metadata?: {
+    companySize?: string;
+    ycBatch?: string;
+    scraperFlow?: string;
+    equityMin?: number;
+    equityMax?: number;
+    employmentType?: string;
+    visaSponsorship?: boolean;
+    experienceLevel?: string;
+  };
 }
 
 export interface JobDetail extends Job {
@@ -84,6 +94,25 @@ export async function decideJob(
   action: 'applied' | 'skipped' | 'not_a_fit'
 ): Promise<void> {
   await api.post(`/jobs/${id}/decide`, { action });
+}
+
+// ─── Scoring Report ───
+export interface ScoringReportCategory {
+  name: string;
+  score: number;
+  max: number;
+  explanation: string;
+}
+
+export interface ScoringReport {
+  overall_score: number;
+  categories: ScoringReportCategory[];
+  summary: string;
+}
+
+export async function fetchJobReport(id: number): Promise<ScoringReport> {
+  const { data } = await api.get(`/jobs/${id}/report`, { timeout: 60000 });
+  return data;
 }
 
 // ─── Scrapers ───

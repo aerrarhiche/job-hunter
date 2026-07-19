@@ -8,6 +8,7 @@ import {
   statusBadgeColor,
   statusLabel,
 } from '@/lib/utils';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -22,7 +23,7 @@ import { useState } from 'react';
 import { useResizableColumns, ResizableTh } from '@/lib/useResizableColumns';
 
 const COLUMN_DEFAULTS = {
-  title: 220, company: 150, source: 90, score: 100, location: 120, date: 90, status: 90, actions: 80,
+  title: 220, company: 150, source: 90, score: 100, size: 70, location: 120, date: 90, status: 90, actions: 80,
 };
 const COLUMN_KEYS = Object.keys(COLUMN_DEFAULTS);
 
@@ -45,6 +46,7 @@ export default function JobTable({
   onFiltersChange,
   onJobClick,
 }: JobTableProps) {
+  const navigate = useNavigate();
   const [showFilters, setShowFilters] = useState(false);
   const { widths, startResize, isResizing } = useResizableColumns(COLUMN_KEYS, COLUMN_DEFAULTS);
 
@@ -149,7 +151,8 @@ export default function JobTable({
                 <ResizableTh width={widths.company} onResizeStart={startResize('company')} className="px-4 py-3 text-left font-medium text-slate-500 dark:text-slate-400">Company</ResizableTh>
                 <ResizableTh width={widths.source} onResizeStart={startResize('source')} className="px-4 py-3 text-left font-medium text-slate-500 dark:text-slate-400">Source</ResizableTh>
                 <ResizableTh width={widths.score} onResizeStart={startResize('score')} className="px-4 py-3 text-left font-medium text-slate-500 dark:text-slate-400">Score</ResizableTh>
-                <ResizableTh width={widths.location} onResizeStart={startResize('location')} className="px-4 py-3 text-left font-medium text-slate-500 dark:text-slate-400">Location</ResizableTh>
+                                <ResizableTh width={widths.size} onResizeStart={startResize('size')} className="px-4 py-3 text-left font-medium text-slate-500 dark:text-slate-400">Size</ResizableTh>
+                                <ResizableTh width={widths.location} onResizeStart={startResize('location')} className="px-4 py-3 text-left font-medium text-slate-500 dark:text-slate-400">Location</ResizableTh>
                 <ResizableTh width={widths.date} onResizeStart={startResize('date')} className="px-4 py-3 text-left font-medium text-slate-500 dark:text-slate-400">Date</ResizableTh>
                 <ResizableTh width={widths.status} onResizeStart={startResize('status')} className="px-4 py-3 text-left font-medium text-slate-500 dark:text-slate-400">Status</ResizableTh>
                 <ResizableTh width={widths.actions} onResizeStart={startResize('actions')} className="px-4 py-3 text-left font-medium text-slate-500 dark:text-slate-400">Actions</ResizableTh>
@@ -159,7 +162,7 @@ export default function JobTable({
               {data.jobs.map((job) => (
                 <tr
                   key={job.id}
-                  onClick={() => onJobClick(job)}
+                  onClick={() => navigate(`/jobs/${job.id}`)}
                   className="cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50"
                 >
                   <td className="px-4 py-3" style={{ width: widths.title }}>
@@ -179,19 +182,33 @@ export default function JobTable({
                     </span>
                   </td>
                   <td className="px-4 py-3" style={{ width: widths.score }}>
-                    <div className="flex items-center gap-2">
-                      <div className="h-1.5 w-12 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
-                        <div
-                          className={cn('h-full rounded-full transition-all', scoreBgColor(job.score))}
-                          style={{ width: `${job.score}%` }}
-                        />
-                      </div>
-                      <span className={cn('text-xs font-semibold', scoreColor(job.score))}>
-                        {job.score}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-slate-400 dark:text-slate-500" style={{ width: widths.location }}>{job.location || '—'}</td>
+                                      <div className="flex items-center gap-2">
+                                        <div className="h-1.5 w-12 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                                          <div
+                                            className={cn('h-full rounded-full transition-all', scoreBgColor(job.score))}
+                                            style={{ width: `${job.score}%` }}
+                                          />
+                                        </div>
+                                        <span className={cn('text-xs font-semibold', scoreColor(job.score))}>
+                                          {job.score}
+                                        </span>
+                                      </div>
+                                    </td>
+                                    <td className="px-4 py-3" style={{ width: widths.size }}>
+                                      {job.metadata?.companySize ? (
+                                        <span className={cn(
+                                          'inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium',
+                                          job.metadata.companySize === '< 10' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' :
+                                          job.metadata.companySize === '10-50' ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400' :
+                                          'border-slate-500/30 bg-slate-500/10 text-slate-600 dark:text-slate-400'
+                                        )}>
+                                          {job.metadata.companySize}
+                                        </span>
+                                      ) : (
+                                        <span className="text-slate-300 dark:text-slate-600">—</span>
+                                      )}
+                                    </td>
+                                    <td className="px-4 py-3 text-slate-400 dark:text-slate-500" style={{ width: widths.location }}>{job.location || '—'}</td>
                   <td className="px-4 py-3 text-slate-400 dark:text-slate-500 text-xs" style={{ width: widths.date }}>
                     {formatDateShort(job.scraped_on || job.date)}
                   </td>
@@ -211,7 +228,7 @@ export default function JobTable({
                       size="sm"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onJobClick(job);
+                        navigate(`/jobs/${job.id}`);
                       }}
                       className="gap-1"
                     >

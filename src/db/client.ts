@@ -25,6 +25,8 @@ export interface JobRow {
   score_reason: string | null;
   scraped_on: string;
   status: string | null;
+  metadata: Record<string, unknown> | null;
+  scoring_report: Record<string, unknown> | null;
 }
 
 export interface DecisionRow {
@@ -233,9 +235,9 @@ export async function insertJob(
 ): Promise<boolean> {
   try {
     await pool.query(
-      `INSERT INTO jobs (title, company, location, url, source, description, salary_min, salary_max, posted_date, score, score_reason)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       ON CONFLICT (url) DO UPDATE SET score = EXCLUDED.score, score_reason = EXCLUDED.score_reason`,
+      `INSERT INTO jobs (title, company, location, url, source, description, salary_min, salary_max, posted_date, score, score_reason, metadata, scoring_report)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       ON CONFLICT (url) DO UPDATE SET score = EXCLUDED.score, score_reason = EXCLUDED.score_reason, metadata = COALESCE(EXCLUDED.metadata, jobs.metadata), scoring_report = COALESCE(EXCLUDED.scoring_report, jobs.scoring_report)`,
       [
         job.title,
         job.company,
@@ -248,6 +250,8 @@ export async function insertJob(
         job.posted_date,
         job.score,
         job.score_reason,
+        job.metadata ? JSON.stringify(job.metadata) : null,
+        job.scoring_report ? JSON.stringify(job.scoring_report) : null,
       ]
     );
     return true;

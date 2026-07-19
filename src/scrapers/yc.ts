@@ -1,15 +1,21 @@
 /**
  * Y Combinator "Work at a Startup" job scraper.
  *
- * ## Performance optimizations
+ * ## Extracted data
+ * - Full structured page: company about, role description, interview process
+ * - YC batch info (S25, W25, etc.)
+ * - Equity range, salary range
+ * - Employment type, visa sponsorship, experience level
+ * - Flow tracking: Flow A (/companies) vs Flow B (/jobs)
+ *
+ * ## Performance
  * - Blocks images/fonts/CSS via request interception (~60% faster page loads)
- * - 5 concurrent detail page workers (reuse pages, don't create/destroy per job)
+ * - 5 concurrent detail page workers (reuse pages)
  * - 3 concurrent role searches per flow
  * - Early scroll stop when no new links appear
- * - Tight scroll waits (800ms × 2 cycles)
  */
 import puppeteer, { Browser } from "puppeteer";
-import type { ScrapedJob } from "./types.js";
+import type { ScrapedJob, ScrapedJobMetadata } from "./types.js";
 import { DEBUG_JOB_LIMIT } from "../agent/pipeline.js";
 
 const DETAIL_DELAY_MS = 200;
@@ -20,7 +26,6 @@ const ROLE_CONCURRENCY = 3;
 
 // ── Resource blocking ──────────────────────────────────────────────
 
-/** Block images, fonts, CSS, media to speed up page loads ~60% */
 async function blockResources(page: any) {
   await page.setRequestInterception(true);
   page.on("request", (req: any) => {
@@ -49,6 +54,14 @@ async function audit(
   } catch (err) {
     console.warn(`  [yc audit] "${step}": ${(err as Error).message}`);
   }
+}
+
+// ── Tagged URL (tracks which flow found it) ────────────────────────
+
+interface TaggedUrl {
+  url: string;
+  /** "companies_search" (Flow A) or "jobs_search" (Flow B) */
+  flow: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -109,34 +122,48 @@ export async function scrapeYC(runId?: number): Promise<ScrapedJob[]> {
       scrapeCompaniesFlow(browser, cfg.search.roleTitles, runId),
       scrapeJobsFlow(browser, cfg.search.roleTitles, runId),
     ]);
-    const companiesUrls: string[] = results[0].status === "fulfilled" ? results[0].value : [];
-    const jobsUrls: string[] = results[1].status === "fulfilled" ? results[1].value : [];
+    const companiesUrls: TaggedUrl[] =
+      results[0].status === "fulfilled" ? results[0].value : [];
+    const jobsUrls: TaggedUrl[] =
+      results[1].status === "fulfilled" ? results[1].value : [];
     if (results[0].status === "rejected")
       console.warn(`  YC /companies flow failed: ${(results[0].reason as Error).message}`);
     if (results[1].status === "rejected")
       console.warn(`  YC /jobs flow failed: ${(results[1].reason as Error).message}`);
 
-    // ── Merge + dedupe ─────────────────────────────────────────────
+    // ── Merge + dedupe (preserve flow info) ────────────────────────
     const seen = new Set<string>();
-    const allUrls: string[] = [];
-    for (const url of [...companiesUrls, ...jobsUrls]) {
-      if (!seen.has(url)) { seen.add(url); allUrls.push(url); }
+    const allTagged: TaggedUrl[] = [];
+    for (const t of [...companiesUrls, ...jobsUrls]) {
+      if (!seen.has(t.url)) {
+        seen.add(t.url);
+        allTagged.push(t);
+      }
     }
-    console.log(`  YC: ${companiesUrls.length}/c + ${jobsUrls.length}/j = ${allUrls.length} unique (${companiesUrls.length + jobsUrls.length - allUrls.length} dupes)`);
+    console.log(
+      `  YC: ${companiesUrls.length}/c + ${jobsUrls.length}/j = ${allTagged.length} unique`
+    );
     await audit(runId, "yc:merge", "completed",
-      `Merged: ${companiesUrls.length} from Flow A + ${jobsUrls.length} from Flow B = ${allUrls.length} unique (${companiesUrls.length + jobsUrls.length - allUrls.length} duplicates removed)`);
-    if (allUrls.length === 0) return [];
+      `Merged: ${companiesUrls.length} from Flow A + ${jobsUrls.length} from Flow B = ${allTagged.length} unique`
+    );
+    if (allTagged.length === 0) return [];
 
     // ── Detail pages (concurrent worker pool) ──────────────────────
-    const limit = DEBUG_JOB_LIMIT > 0 ? Math.min(allUrls.length, DEBUG_JOB_LIMIT) : allUrls.length;
-    await audit(runId, "yc:details", "running", `Visiting ${limit} pages (${DETAIL_CONCURRENCY} workers)...`);
+    const limit =
+      DEBUG_JOB_LIMIT > 0
+        ? Math.min(allTagged.length, DEBUG_JOB_LIMIT)
+        : allTagged.length;
+    await audit(runId, "yc:details", "running",
+      `Visiting ${limit} pages (${DETAIL_CONCURRENCY} workers)...`
+    );
     const start = Date.now();
-    const jobs = await extractDetails(browser, allUrls.slice(0, limit), CUTOFF_DATE);
+    const jobs = await extractDetails(browser, allTagged.slice(0, limit), CUTOFF_DATE);
     const elapsed = ((Date.now() - start) / 1000).toFixed(1);
 
     console.log(`  YC: extracted ${jobs.length} jobs in ${elapsed}s`);
     await audit(runId, "yc:details", "completed", `${jobs.length} jobs extracted`, {
-      count: jobs.length, elapsed_sec: parseFloat(elapsed),
+      count: jobs.length,
+      elapsed_sec: parseFloat(elapsed),
     });
     return jobs;
   } catch (err) {
@@ -153,84 +180,216 @@ export async function scrapeYC(runId?: number): Promise<ScrapedJob[]> {
 
 async function extractDetails(
   browser: Browser,
-  urls: string[],
+  taggedUrls: TaggedUrl[],
   cutoffDate: string
 ): Promise<ScrapedJob[]> {
   const jobs: ScrapedJob[] = [];
-  const queue = [...urls];
+  const queue = [...taggedUrls];
 
   async function worker() {
-    // Reuse a single page for multiple jobs (no create/destroy per job)
     const page = await browser.newPage();
     await blockResources(page);
 
     try {
       while (queue.length > 0) {
-        const url = queue.shift()!;
+        const tagged = queue.shift()!;
         try {
-          await page.goto(url, { waitUntil: "networkidle2", timeout: 15000 });
+          await page.goto(tagged.url, {
+            waitUntil: "networkidle2",
+            timeout: 15000,
+          });
 
-          const detail = await page.evaluate((cd: string) => {
-            const h1Text = document.querySelector("h1")?.textContent?.trim() || "";
-            const title = h1Text.split(" at ")[0]?.trim() || h1Text;
-            const company = document.querySelector("h1 a")?.textContent?.trim() || "";
+          const detail = await page.evaluate(
+            (cd: string, flow: string) => {
+              // ── Title & Company ──────────────────────────────────
+              const h1Text =
+                document.querySelector("h1")?.textContent?.trim() || "";
+              const title = h1Text.split(" at ")[0]?.trim() || h1Text;
+              const company =
+                document.querySelector("h1 a")?.textContent?.trim() || "";
 
-            const salaryEl =
-              document.querySelector("div.text-gray-500 span") ||
-              document.querySelector('[class*="text-gray-500"] span');
-            const salaryText = salaryEl?.textContent?.trim() || "";
-            let sMin: number | null = null;
-            let sMax: number | null = null;
-            const sm = salaryText.match(
-              /(?:€|\$|£)([\d,.]+)\s*[KMB]?\s*[-–—to]+\s*(?:€|\$|£)?\s*([\d,.]+)\s*[KMB]?/i
-            );
-            if (sm) {
-              const p = (s: string) =>
-                parseFloat(s.replace(/[,]/g, "")) * (/[KMB]/i.test(salaryText) ? 1000 : 1);
-              sMin = p(sm[1]); sMax = p(sm[2]);
-            }
+              // YC batch (e.g. "(S25)" in the title)
+              const batchMatch = h1Text.match(/\(([SW]\d{2})\)/);
+              const ycBatch = batchMatch ? batchMatch[1] : undefined;
 
-            const lc = document.querySelector(".fa-location-dot")?.closest("span");
-            const ls = lc?.querySelectorAll("span");
-            const location = (ls && ls.length > 0
-              ? ls[ls.length - 1]?.textContent?.trim() : "") || "";
+              // ── Salary & Equity ──────────────────────────────────
+              const salaryEl =
+                document.querySelector("div.text-gray-500 span") ||
+                document.querySelector('[class*="text-gray-500"] span');
+              const salaryText = salaryEl?.textContent?.trim() || "";
 
-            const description =
-              document.querySelector(".prose")?.textContent?.trim()?.substring(0, 3000) || "";
-
-            const dateEl = document.querySelector("time[datetime]");
-            let posted: string | null = dateEl
-              ? dateEl.getAttribute("datetime")?.split("T")[0] || null : null;
-            if (!posted) {
-              const dm = (document.body?.innerText || "").match(/(\d+)\s*days?\s*ago/i);
-              if (dm) {
-                const d = new Date(); d.setDate(d.getDate() - parseInt(dm[1], 10));
-                posted = d.toISOString().split("T")[0];
+              let sMin: number | null = null;
+              let sMax: number | null = null;
+              const sm = salaryText.match(
+                /(?:€|\$|£)([\d,.]+)\s*[KMB]?\s*[-–—to]+\s*(?:€|\$|£)?\s*([\d,.]+)\s*[KMB]?/i
+              );
+              if (sm) {
+                const p = (s: string) =>
+                  parseFloat(s.replace(/[,]/g, "")) *
+                  (/[KMB]/i.test(salaryText) ? 1000 : 1);
+                sMin = p(sm[1]);
+                sMax = p(sm[2]);
               }
-            }
-            return { title, company, location, description, salaryMin: sMin, salaryMax: sMax,
-              postedDate: posted, isOld: posted !== null && posted < cd };
-          }, cutoffDate);
+
+              // Equity
+              let eMin: number | null = null;
+              let eMax: number | null = null;
+              const eqMatch = salaryText.match(
+                /([\d.]+)%\s*[-–—to]+\s*([\d.]+)%/
+              );
+              if (eqMatch) {
+                eMin = parseFloat(eqMatch[1]);
+                eMax = parseFloat(eqMatch[2]);
+              }
+
+              // ── Location ─────────────────────────────────────────
+              const lc = document
+                .querySelector(".fa-location-dot")
+                ?.closest("span");
+              const ls = lc?.querySelectorAll("span");
+              const location =
+                (ls && ls.length > 0
+                  ? ls[ls.length - 1]?.textContent?.trim()
+                  : "") || "";
+
+              // ── Tags (employment type, visa, experience) ─────────
+              const tags: string[] = [];
+              const tagSpans = document.querySelectorAll(
+                "span.inline-flex.items-center.gap-1\\.5"
+              );
+              tagSpans.forEach((el) => {
+                const t = el.textContent?.trim();
+                if (t && t.length < 50) tags.push(t);
+              });
+
+              const employmentType = tags.find((t) =>
+                /full.time|part.time|contract|intern/i.test(t)
+              );
+              const visaSponsorship = tags.some((t) =>
+                /sponsor/i.test(t)
+              );
+              const expMatch = tags
+                .find((t) => /(\d+)\+?\s*years?/i.test(t))
+                ?.match(/(\d+)\+?\s*years?/i);
+              const experienceLevel = expMatch ? expMatch[0] : undefined;
+
+              // ── Structured descriptions ───────────────────────────
+              const proseSections = document.querySelectorAll(".prose");
+              let companyDescription = "";
+              let roleDescription = "";
+              let interviewProcess = "";
+
+              // YC detail page sections are: "About X", "About the role", "Interview Process"
+              const allProse = Array.from(proseSections);
+              for (let i = 0; i < allProse.length; i++) {
+                const text = allProse[i].textContent?.trim() || "";
+                // Find the nearest preceding heading
+                const prevHeading = allProse[i]
+                  .closest("div")
+                  ?.previousElementSibling?.querySelector("span")
+                  ?.textContent?.trim() || "";
+                if (
+                  prevHeading.toLowerCase().includes("about") &&
+                  !prevHeading.toLowerCase().includes("role")
+                ) {
+                  companyDescription = text;
+                } else if (prevHeading.toLowerCase().includes("role")) {
+                  roleDescription = text;
+                } else if (
+                  prevHeading.toLowerCase().includes("interview")
+                ) {
+                  interviewProcess = text;
+                }
+              }
+
+              // Fallback: if headings didn't map, use position
+              if (!companyDescription && allProse[1]) {
+                companyDescription = allProse[1].textContent?.trim() || "";
+              }
+              if (!roleDescription && allProse[2]) {
+                roleDescription = allProse[2].textContent?.trim() || "";
+              }
+              if (!interviewProcess && allProse[3]) {
+                interviewProcess = allProse[3].textContent?.trim() || "";
+              }
+
+              // Use role description as primary, fall back to first prose
+              const description =
+                (roleDescription ||
+                  allProse[0]?.textContent?.trim() ||
+                  "")
+                  .substring(0, 4000);
+
+              // ── Posted date ──────────────────────────────────────
+              const dateEl = document.querySelector("time[datetime]");
+              let posted: string | null = dateEl
+                ? dateEl.getAttribute("datetime")?.split("T")[0] || null
+                : null;
+              if (!posted) {
+                const dm = (document.body?.innerText || "").match(
+                  /(\d+)\s*days?\s*ago/i
+                );
+                if (dm) {
+                  const d = new Date();
+                  d.setDate(d.getDate() - parseInt(dm[1], 10));
+                  posted = d.toISOString().split("T")[0];
+                }
+              }
+
+              return {
+                title,
+                company,
+                location,
+                description,
+                salaryMin: sMin,
+                salaryMax: sMax,
+                postedDate: posted,
+                isOld: posted !== null && posted < cd,
+                metadata: {
+                  scraperFlow: flow,
+                  ycBatch,
+                  equityMin: eMin,
+                  equityMax: eMax,
+                  employmentType,
+                  visaSponsorship: visaSponsorship || undefined,
+                  experienceLevel,
+                  companyDescription: companyDescription?.substring(0, 2000),
+                  roleDescription: roleDescription?.substring(0, 4000),
+                  interviewProcess: interviewProcess?.substring(0, 2000),
+                  tags: tags.length > 0 ? tags : undefined,
+                } as ScrapedJobMetadata,
+              };
+            },
+            cutoffDate,
+            tagged.flow
+          );
 
           if (!detail.isOld) {
             jobs.push({
-              title: detail.title, company: detail.company || "YC Startup",
-              location: detail.location || "Unknown", url, description: detail.description || "",
-              source: "yc", salaryMin: detail.salaryMin, salaryMax: detail.salaryMax,
+              title: detail.title,
+              company: detail.company || "YC Startup",
+              location: detail.location || "Unknown",
+              url: tagged.url,
+              description: detail.description || "",
+              source: "yc",
+              salaryMin: detail.salaryMin,
+              salaryMax: detail.salaryMax,
               postedDate: detail.postedDate,
+              metadata: detail.metadata,
             });
           }
         } catch (err) {
           console.warn(`  YC detail failed: ${(err as Error).message}`);
         }
-        if (queue.length > 0) await new Promise((r) => setTimeout(r, DETAIL_DELAY_MS));
+        if (queue.length > 0)
+          await new Promise((r) => setTimeout(r, DETAIL_DELAY_MS));
       }
     } finally {
       await page.close();
     }
   }
 
-  const n = Math.min(DETAIL_CONCURRENCY, urls.length);
+  const n = Math.min(DETAIL_CONCURRENCY, taggedUrls.length);
   await Promise.all(Array.from({ length: n }, () => worker()));
   return jobs;
 }
@@ -239,11 +398,14 @@ async function extractDetails(
 // Flow A: /companies filtered directory
 // ═══════════════════════════════════════════════════════════════════
 
-async function scrapeCompaniesFlow(browser: Browser, roles: string[], runId?: number): Promise<string[]> {
+async function scrapeCompaniesFlow(
+  browser: Browser,
+  roles: string[],
+  runId?: number
+): Promise<TaggedUrl[]> {
   const seen = new Set<string>();
-  const urls: string[] = [];
+  const urls: TaggedUrl[] = [];
 
-  // Search roles in parallel batches
   for (let i = 0; i < roles.length; i += ROLE_CONCURRENCY) {
     const batch = roles.slice(i, i + ROLE_CONCURRENCY);
     const results = await Promise.all(
@@ -252,15 +414,25 @@ async function scrapeCompaniesFlow(browser: Browser, roles: string[], runId?: nu
     for (const [j, batchUrls] of results.entries()) {
       let n = 0;
       for (const u of batchUrls) {
-        if (!seen.has(u)) { seen.add(u); urls.push(u); n++; }
+        if (!seen.has(u.url)) {
+          seen.add(u.url);
+          urls.push(u);
+          n++;
+        }
       }
-      console.log(`  YC /companies: "${batch[j]}" — ${batchUrls.length} links, ${n} new (total: ${urls.length})`);
+      console.log(
+        `  YC /companies: "${batch[j]}" — ${batchUrls.length} links, ${n} new (total: ${urls.length})`
+      );
     }
   }
   return urls;
 }
 
-async function searchCompaniesRole(browser: Browser, role: string, runId?: number): Promise<string[]> {
+async function searchCompaniesRole(
+  browser: Browser,
+  role: string,
+  runId?: number
+): Promise<TaggedUrl[]> {
   const page = await browser.newPage();
   await blockResources(page);
 
@@ -282,7 +454,6 @@ async function searchCompaniesRole(browser: Browser, role: string, runId?: numbe
     for (let i = 0; i < SCROLL_COUNT; i++) {
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
       await new Promise((r) => setTimeout(r, SCROLL_WAIT_MS));
-      // Early stop: if no new content loaded, don't keep scrolling
       const current = await page.evaluate(
         () => document.querySelectorAll('a[href*="/jobs/"]').length
       );
@@ -295,8 +466,15 @@ async function searchCompaniesRole(browser: Browser, role: string, runId?: numbe
         .map((a) => (a as HTMLAnchorElement).href)
         .filter((href) => href.match(/\/jobs\/\d+/))
     );
-    await audit(runId, `yc:search:A:${role}`, "completed", `[Flow A] "${role}" → ${links.length} links`);
-    return links;
+
+    await audit(
+      runId,
+      `yc:search:A:${role}`,
+      "completed",
+      `[Flow A] "${role}" → ${links.length} links`
+    );
+
+    return links.map((url) => ({ url, flow: "companies_search" }));
   } finally {
     await page.close();
   }
@@ -306,22 +484,35 @@ async function searchCompaniesRole(browser: Browser, role: string, runId?: numbe
 // Flow B: /jobs AI-powered textarea search
 // ═══════════════════════════════════════════════════════════════════
 
-async function scrapeJobsFlow(browser: Browser, roles: string[], runId?: number): Promise<string[]> {
+async function scrapeJobsFlow(
+  browser: Browser,
+  roles: string[],
+  runId?: number
+): Promise<TaggedUrl[]> {
   const page = await browser.newPage();
   await blockResources(page);
   const seen = new Set<string>();
-  const urls: string[] = [];
+  const urls: TaggedUrl[] = [];
 
   await page.goto("https://www.workatastartup.com/jobs", {
-    waitUntil: "networkidle2", timeout: 20000,
+    waitUntil: "networkidle2",
+    timeout: 20000,
   });
 
   for (const role of roles) {
     console.log(`  YC /jobs: searching "${role}"...`);
-    await audit(runId, `yc:search:B:${role}`, "running", `[Flow B] searching "${role}"...`);
+    await audit(
+      runId,
+      `yc:search:B:${role}`,
+      "running",
+      `[Flow B] searching "${role}"...`
+    );
     try {
       const ta = await page.$("textarea");
-      if (!ta) { console.warn("    no textarea, skipping"); continue; }
+      if (!ta) {
+        console.warn("    no textarea, skipping");
+        continue;
+      }
 
       await ta.click();
       await page.keyboard.down("Control");
@@ -333,16 +524,23 @@ async function scrapeJobsFlow(browser: Browser, roles: string[], runId?: number)
       if (btn) await btn.click();
 
       const appeared = await Promise.race([
-        page.waitForSelector('a[href*="/jobs/"]', { timeout: 12000 }).then(() => true),
+        page
+          .waitForSelector('a[href*="/jobs/"]', { timeout: 12000 })
+          .then(() => true),
         new Promise<boolean>((r) => setTimeout(() => r(false), 12000)),
       ]);
-      if (!appeared) { console.warn("    results did not load, skipping"); continue; }
+      if (!appeared) {
+        console.warn("    results did not load, skipping");
+        continue;
+      }
 
       await new Promise((r) => setTimeout(r, 1500));
 
       let prevCount = 0;
       for (let i = 0; i < SCROLL_COUNT; i++) {
-        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        await page.evaluate(() =>
+          window.scrollTo(0, document.body.scrollHeight)
+        );
         await new Promise((r) => setTimeout(r, SCROLL_WAIT_MS));
         const current = await page.evaluate(
           () => document.querySelectorAll('a[href*="/jobs/"]').length
@@ -358,9 +556,20 @@ async function scrapeJobsFlow(browser: Browser, roles: string[], runId?: number)
       );
 
       let n = 0;
-      for (const u of batch) { if (!seen.has(u)) { seen.add(u); urls.push(u); n++; } }
+      for (const u of batch) {
+        if (!seen.has(u)) {
+          seen.add(u);
+          urls.push({ url: u, flow: "jobs_search" });
+          n++;
+        }
+      }
       console.log(`    ${batch.length} links, ${n} new (total: ${urls.length})`);
-      await audit(runId, `yc:search:B:${role}`, "completed", `[Flow B] "${role}" → ${batch.length} links (${n} new)`);
+      await audit(
+        runId,
+        `yc:search:B:${role}`,
+        "completed",
+        `[Flow B] "${role}" → ${batch.length} links (${n} new)`
+      );
     } catch (err) {
       console.warn(`    /jobs "${role}" failed: ${(err as Error).message}`);
     }

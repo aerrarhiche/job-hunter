@@ -1,18 +1,14 @@
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { fetchJobs, decideJob } from '@/lib/api';
+import { fetchJobs } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { RefreshCw } from 'lucide-react';
-import { useToast } from '@/components/ui/toast';
 import { useState } from 'react';
 import JobTable from '@/components/JobTable';
-import JobDetail from '@/components/JobDetail';
 
 export default function JobsPage() {
-  const { toast } = useToast();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState({ source: '', minScore: 0, status: '' });
-  const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
 
   const { data, isLoading, isPlaceholderData } = useQuery({
     queryKey: ['jobs', page, filters],
@@ -40,18 +36,8 @@ export default function JobsPage() {
         onPageChange={setPage}
         filters={filters}
         onFiltersChange={setFilters}
-        onJobClick={(job) => setSelectedJobId(job.id)}
+        onJobClick={() => {}}
       />
-      {selectedJobId && (
-        <JobDetail
-          jobId={selectedJobId}
-          onClose={() => setSelectedJobId(null)}
-          onDecide={() => {
-            setSelectedJobId(null);
-            refresh();
-          }}
-        />
-      )}
     </div>
   );
 }
