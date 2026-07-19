@@ -169,6 +169,9 @@ export async function scoreAndStoreJobs(
           return;
         }
 
+        // Use the detailed report's score as the canonical score (more accurate than Pass 1)
+        const finalScore = report.overall_score;
+
         await insertJob({
           title: job.title,
           company: job.company,
@@ -179,8 +182,8 @@ export async function scoreAndStoreJobs(
           salary_min: job.salaryMin ?? null,
           salary_max: job.salaryMax ?? null,
           posted_date: job.postedDate ?? null,
-          score,
-          score_reason: reason,
+          score: finalScore,
+          score_reason: report.summary,
           status: "new",
           metadata: enrichedMetadata as any,
           scoring_report: report as any,

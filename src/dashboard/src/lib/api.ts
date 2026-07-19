@@ -141,6 +141,41 @@ export async function fetchCoverLetter(id: number): Promise<CoverLetter> {
   return data;
 }
 
+// ─── Level Up ───
+export interface LevelUpItem {
+  id: number;
+  skill_name: string;
+  category: string | null;
+  source_job_ids: number[] | null;
+  status: 'to_learn' | 'learning' | 'some_experience' | 'competitor_mastery' | 'mastered';
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function fetchLevelUpItems(): Promise<LevelUpItem[]> {
+  const { data } = await api.get('/level-up');
+  return data;
+}
+
+export async function generateLevelUp(): Promise<{ generated: number; items: LevelUpItem[] }> {
+  const { data } = await api.post('/level-up/generate', {}, { timeout: 300000 });
+  return data;
+}
+
+export async function updateLevelUpItem(
+  id: number,
+  updates: { status?: string; notes?: string }
+): Promise<LevelUpItem> {
+  const { data } = await api.put(`/level-up/${id}`, updates);
+  return data;
+}
+
+export async function suggestResume(): Promise<{ suggested: string }> {
+  const { data } = await api.post('/level-up/suggest-resume', {}, { timeout: 60000 });
+  return data;
+}
+
 // ─── Scrapers ───
 export interface Scraper {
   id: string;

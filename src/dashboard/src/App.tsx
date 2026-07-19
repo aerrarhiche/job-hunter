@@ -10,6 +10,7 @@ import ScoutPage from '@/pages/ScoutPage';
 import ConfigPage from '@/pages/ConfigPage';
 import HistoryPage from '@/pages/HistoryPage';
 import DocsPage from '@/pages/DocsPage';
+import LevelUpPage from '@/pages/LevelUpPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,6 +37,7 @@ export default function App() {
                 <Route path="config" element={<ConfigPage />} />
                 <Route path="history" element={<HistoryPage />} />
                 <Route path="docs" element={<DocsPage />} />
+                                <Route path="level-up" element={<LevelUpPage />} />
               </Route>
             </Routes>
           </BrowserRouter>
