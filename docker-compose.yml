@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: jobagent
+      POSTGRES_USER: jobagent
+      POSTGRES_PASSWORD: change-me
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobagent"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  job-agent:
+    build: .
+    ports:
+      - "0.0.0.0:3001:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - APIFY_TOKEN=${APIFY_TOKEN}
+      - YC_EMAIL=${YC_EMAIL}
+      - YC_PASSWORD=${YC_PASSWORD}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=jobagent
+      - POSTGRES_USER=jobagent
+      - POSTGRES_PASSWORD=change-me
+      - DAILY_RUN_HOUR=${DAILY_RUN_HOUR:-7}
+      - DAILY_RUN_MINUTE=${DAILY_RUN_MINUTE:-0}
+      - SEARCH_REMOTE_ONLY=${SEARCH_REMOTE_ONLY:-true}
+      - SEARCH_EXCLUDE_KEYWORDS=${SEARCH_EXCLUDE_KEYWORDS}
+      - SEARCH_MUST_HAVE=${SEARCH_MUST_HAVE}
+      - SEARCH_ROLE_TITLES=${SEARCH_ROLE_TITLES}
+    volumes:
+      - ./resume:/app/resume:ro
+    restart: unless-stopped
+
+volumes:
+  pgdata:

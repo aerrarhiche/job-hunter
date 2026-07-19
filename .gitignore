@@ -1,0 +1,7 @@
+node_modules
+dist
+.env
+*.log
+resume/tailored/
+resume/master.md
+resume/soul.md
