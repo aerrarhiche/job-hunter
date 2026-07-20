@@ -268,6 +268,11 @@ async function extractDetails(
               const visaSponsorship = tags.some((t) =>
                 /sponsor/i.test(t)
               );
+
+              // ── Hard filter: US citizen/visa only ──────────────
+              const usOnly = tags.some((t) =>
+                /us citizen.*visa only|visa only.*us citizen|us only/i.test(t)
+              );
               const expMatch = tags
                 .find((t) => /(\d+)\+?\s*years?/i.test(t))
                 ?.match(/(\d+)\+?\s*years?/i);
@@ -345,6 +350,7 @@ async function extractDetails(
                 salaryMax: sMax,
                 postedDate: posted,
                 isOld: posted !== null && posted < cd,
+                usOnly,
                 metadata: {
                   scraperFlow: flow,
                   ycBatch,
@@ -365,6 +371,12 @@ async function extractDetails(
           );
 
           if (!detail.isOld) {
+            // Skip US citizen/visa only jobs immediately
+            if (detail.usOnly) {
+              console.log(`  YC skipped (US-only): ${detail.title} @ ${detail.company}`);
+              continue;
+            }
+
             jobs.push({
               title: detail.title,
               company: detail.company || "YC Startup",
