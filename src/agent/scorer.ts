@@ -449,7 +449,7 @@ RULES:
 5. Professional, relaxed tone — confident without enthusiasm. No exclamation marks. No words like "love", "passionate", "thrilled", "excited", "resonates deeply", "dream role".
 6. Include a simple call to action at the end.
 7. NEVER invent experience not in the resume. NEVER claim to know the company or its founders personally.
-8. Use markdown formatting.
+8. Use markdown formatting. Never use em dashes (—).
 
 Respond with ONLY a JSON object:
 {
