@@ -1,7 +1,26 @@
-node_modules
-dist
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Environment / secrets
 .env
+.env.local
+.env.*.local
+
+# Logs
 *.log
-resume/tailored/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / editor
+.DS_Store
+
+# Personal job-search inputs (never publish)
 resume/master.md
 resume/soul.md
+resume/fullstack.md
+resume/tailored/
