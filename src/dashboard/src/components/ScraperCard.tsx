@@ -1,7 +1,7 @@
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { Play, Loader2, Globe, Linkedin, Bot } from 'lucide-react';
-import { typeToIcon, timeAgo } from '@/lib/utils';
+import { timeAgo } from '@/lib/utils';
 
 interface ScraperCardProps {
   id: string;

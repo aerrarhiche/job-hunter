@@ -39,6 +39,7 @@ export interface Job {
   score: number;
   location: string;
   date: string;
+  scraped_on?: string;
   status: string;
   url?: string;
   metadata?: {
@@ -90,7 +91,7 @@ export async function fetchJob(id: number): Promise<any> {
 }
 
 export async function decideJob(
-  id: string,
+  id: string | number,
   action: 'applied' | 'skipped' | 'not_a_fit'
 ): Promise<void> {
   await api.post(`/jobs/${id}/decide`, { action });

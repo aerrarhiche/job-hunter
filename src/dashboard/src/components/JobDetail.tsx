@@ -20,7 +20,7 @@ export default function JobDetail({ jobId, onClose, onDecide }: JobDetailProps) 
     queryFn: () => fetchJob(jobId),
   });
 
-  const handleDecide = async (action: string) => {
+  const handleDecide = async (action: 'applied' | 'skipped' | 'not_a_fit') => {
     try {
       await decideJob(jobId, action);
       toast({ title: `Job marked as ${statusLabel(action)}` });

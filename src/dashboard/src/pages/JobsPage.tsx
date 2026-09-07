@@ -12,7 +12,7 @@ export default function JobsPage() {
 
   const { data, isLoading, isPlaceholderData } = useQuery({
     queryKey: ['jobs', page, filters],
-    queryFn: () => fetchJobs({ page, limit: 20, source: filters.source || undefined, minScore: filters.minScore > 0 ? String(filters.minScore) : undefined, status: filters.status || undefined }),
+    queryFn: () => fetchJobs({ page, limit: 20, source: filters.source || undefined, minScore: filters.minScore > 0 ? filters.minScore : undefined, status: filters.status || undefined }),
     placeholderData: keepPreviousData,
   });
 
