@@ -2,7 +2,6 @@ import { CronJob } from "cron";
 import { cfg } from "./config.js";
 import {
   pool,
-  insertJob,
   urlExists,
   getActiveScrapers,
   createScoutRun,
@@ -12,8 +11,9 @@ import {
   seedDefaults,
   insertAuditLog,
 } from "./db/client.js";
-import { scoreJob } from "./agent/scorer.js";
 import { scoreAndStoreJobs } from "./agent/pipeline.js";
+import { filterJobs, dedupeJobs, type SearchConfig } from "./agent/filter.js";
+import { DEFAULT_API_PORT } from "./constants.js";
 import { scrapeYC } from "./scrapers/yc.js";
 import { scrapeLinkedIn } from "./scrapers/linkedin.js";
 import { scrapeCustom } from "./scrapers/custom.js";
@@ -27,17 +27,7 @@ import type { ScraperRow } from "./db/client.js";
 // Search config overrides from DB
 // ---------------------------------------------------------------------------
 
-interface SearchOverrides {
-  excludeKeywords: string[];
-  mustHave: string[];
-  roleTitles: string[];
-  locations: string[];
-  minSalary: number;
-  minScore: number;
-  remoteOnly: boolean;
-}
-
-async function loadSearchConfig(): Promise<SearchOverrides> {
+async function loadSearchConfig(): Promise<SearchConfig> {
   const dbConfig = await getSearchConfig();
 
   return {
@@ -53,15 +43,11 @@ async function loadSearchConfig(): Promise<SearchOverrides> {
     locations: dbConfig.locations
       ? dbConfig.locations.split(",").map((l) => l.trim())
       : cfg.search.locations,
-    minSalary: dbConfig.min_salary
-      ? parseInt(dbConfig.min_salary, 10)
-      : cfg.search.minSalary,
+    minSalary: dbConfig.min_salary ? parseInt(dbConfig.min_salary, 10) : cfg.search.minSalary,
     minScore: dbConfig.score_threshold
       ? parseInt(dbConfig.score_threshold, 10)
       : cfg.search.minScore,
-    remoteOnly: dbConfig.remote_only
-      ? dbConfig.remote_only === "true"
-      : cfg.search.remoteOnly,
+    remoteOnly: dbConfig.remote_only ? dbConfig.remote_only === "true" : cfg.search.remoteOnly,
   };
 }
 
@@ -69,10 +55,7 @@ async function loadSearchConfig(): Promise<SearchOverrides> {
 // Run a single scraper and return its jobs
 // ---------------------------------------------------------------------------
 
-async function runScraper(
-  scraper: ScraperRow,
-  runId: number
-): Promise<ScrapedJob[]> {
+async function runScraper(scraper: ScraperRow, runId: number): Promise<ScrapedJob[]> {
   const step = `scraper:${scraper.name}`;
   await insertAuditLog(runId, step, "running", `Starting ${scraper.name}...`);
 
@@ -92,7 +75,9 @@ async function runScraper(
     }
 
     await updateScraperRun(scraper.id);
-    await insertAuditLog(runId, step, "completed", `${scraper.name}: ${jobs.length} jobs found`, { count: jobs.length });
+    await insertAuditLog(runId, step, "completed", `${scraper.name}: ${jobs.length} jobs found`, {
+      count: jobs.length,
+    });
     return jobs;
   } catch (err) {
     const msg = (err as Error).message;
@@ -124,7 +109,7 @@ async function scout(): Promise<void> {
   const scrapers = await getActiveScrapers();
   console.log(`Active scrapers: ${scrapers.map((s) => `${s.name} (${s.type})`).join(", ")}`);
   await insertAuditLog(runId, "init", "completed", `${scrapers.length} active scrapers`, {
-    scrapers: scrapers.map(s => s.name),
+    scrapers: scrapers.map((s) => s.name),
   });
 
   // 2. Run each scraper
@@ -144,62 +129,42 @@ async function scout(): Promise<void> {
     else customJobs += jobs.length;
   }
 
-  await insertAuditLog(runId, "scraping", "completed", `Total: ${allJobs.length} raw jobs (YC: ${ycJobs}, LI: ${linkedinJobs}, Custom: ${customJobs})`, {
-    total: allJobs.length, yc: ycJobs, linkedin: linkedinJobs, custom: customJobs,
-  });
+  await insertAuditLog(
+    runId,
+    "scraping",
+    "completed",
+    `Total: ${allJobs.length} raw jobs (YC: ${ycJobs}, LI: ${linkedinJobs}, Custom: ${customJobs})`,
+    {
+      total: allJobs.length,
+      yc: ycJobs,
+      linkedin: linkedinJobs,
+      custom: customJobs,
+    }
+  );
 
   // 3. TechCrunch funding check
   console.log("\nChecking TechCrunch for new funding...");
   await insertAuditLog(runId, "funding", "running", "Checking TechCrunch...");
   const fundingRounds = await checkTechCrunchFunding();
   console.log(`  Found ${fundingRounds.length} recent funding events`);
-  await insertAuditLog(runId, "funding", "completed", `${fundingRounds.length} funding events`, { count: fundingRounds.length });
+  await insertAuditLog(runId, "funding", "completed", `${fundingRounds.length} funding events`, {
+    count: fundingRounds.length,
+  });
 
   // 4. Merge and dedupe
-  const seen = new Set<string>();
-  const unique = allJobs.filter((j) => {
-    if (seen.has(j.url) || !j.title || !j.company) return false;
-    seen.add(j.url);
-    return true;
-  });
+  const unique = dedupeJobs(allJobs);
   console.log(`\nTotal unique jobs: ${unique.length}`);
   await insertAuditLog(runId, "dedupe", "completed", `${unique.length} unique jobs`);
 
   // 5. Filter by hard criteria
-  const filtered = unique.filter((j) => {
-    const text = `${j.title} ${j.description}`.toLowerCase();
-    const titleLower = j.title.toLowerCase();
-    const locLower = (j.location || "").toLowerCase();
-
-    if (searchConfig.excludeKeywords.some((kw) => text.includes(kw))) return false;
-
-    const matchesRole = searchConfig.roleTitles.some((role) =>
-      titleLower.includes(role.toLowerCase())
-    );
-    const matchesTech = searchConfig.mustHave.some((tech) =>
-      text.includes(tech)
-    );
-    if (!matchesRole && !matchesTech) return false;
-
-    if (searchConfig.remoteOnly && locLower && locLower !== "unknown") {
-      if (/\bon.site\b|\bin.office\b|\bin.person\b/i.test(locLower)) return false;
-    }
-
-    if (searchConfig.locations.length > 0 && locLower && locLower !== "unknown") {
-      const matchesLocation = searchConfig.locations.some(
-        (l) => locLower.includes(l.toLowerCase()) || l.toLowerCase().includes(locLower)
-      );
-      if (!matchesLocation) return false;
-    }
-
-    if (j.salaryMin != null && searchConfig.minSalary > 0 && j.salaryMin < searchConfig.minSalary) {
-      return false;
-    }
-
-    return true;
-  });
+  const filtered = filterJobs(unique, searchConfig);
   console.log(`After hard filters: ${filtered.length}`);
-  await insertAuditLog(runId, "filter", "completed", `${filtered.length} passed filters (${unique.length - filtered.length} dropped)`);
+  await insertAuditLog(
+    runId,
+    "filter",
+    "completed",
+    `${filtered.length} passed filters (${unique.length - filtered.length} dropped)`
+  );
 
   // 6. Dedupe against DB
   let newCount = 0;
@@ -217,10 +182,20 @@ async function scout(): Promise<void> {
     step: "scoring",
   });
 
-  console.log(`\nScored and stored: ${scored} jobs (${skipped} below threshold of ${searchConfig.minScore})`);
-  await insertAuditLog(runId, "scoring", "completed", `${scored} stored, ${skipped} below ${searchConfig.minScore}`, {
-    stored: scored, skipped, threshold: searchConfig.minScore,
-  });
+  console.log(
+    `\nScored and stored: ${scored} jobs (${skipped} below threshold of ${searchConfig.minScore})`
+  );
+  await insertAuditLog(
+    runId,
+    "scoring",
+    "completed",
+    `${scored} stored, ${skipped} below ${searchConfig.minScore}`,
+    {
+      stored: scored,
+      skipped,
+      threshold: searchConfig.minScore,
+    }
+  );
 
   // 8. Show funding alerts
   if (fundingRounds.length > 0) {
@@ -239,7 +214,12 @@ async function scout(): Promise<void> {
     status: "completed",
   });
 
-  await insertAuditLog(runId, "pipeline", "completed", `Done: ${scored} jobs stored from ${allJobs.length} raw`);
+  await insertAuditLog(
+    runId,
+    "pipeline",
+    "completed",
+    `Done: ${scored} jobs stored from ${allJobs.length} raw`
+  );
 
   // 10. Send brief
   await sendDailyBrief();
@@ -252,9 +232,15 @@ async function scout(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
+  if (!cfg.deepseek.apiKey) {
+    console.error("DEEPSEEK_API_KEY is required. Add it to .env (see .env.example).");
+    process.exit(1);
+  }
   console.log("Job Agent starting...");
   console.log(`Using DeepSeek @ ${cfg.deepseek.baseUrl}`);
-  console.log(`Daily run: ${cfg.schedule.hour}:${String(cfg.schedule.minute).padStart(2, "0")} UTC`);
+  console.log(
+    `Daily run: ${cfg.schedule.hour}:${String(cfg.schedule.minute).padStart(2, "0")} UTC`
+  );
   console.log(`Min score threshold: ${cfg.search.minScore}`);
   console.log(`Excluding keywords: ${cfg.search.excludeKeywords.join(", ")}`);
   console.log(`Target roles: ${cfg.search.roleTitles.join(", ")}`);
@@ -276,7 +262,7 @@ async function main(): Promise<void> {
   }
 
   const app = createServer();
-  const PORT = parseInt(process.env.API_PORT || "3000", 10);
+  const PORT = parseInt(process.env.API_PORT || String(DEFAULT_API_PORT), 10);
   app.listen(PORT, () => {
     console.log(`API server listening on http://0.0.0.0:${PORT}`);
   });

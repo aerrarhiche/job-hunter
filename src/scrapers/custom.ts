@@ -1,4 +1,4 @@
-import puppeteer from "puppeteer";
+import puppeteer, { type Page } from "puppeteer";
 import OpenAI from "openai";
 import { cfg } from "../config.js";
 import type { ScrapedJob } from "./types.js";
@@ -17,9 +17,7 @@ const ai = new OpenAI({
  * directly.  Otherwise it sends the page text to DeepSeek to auto-detect job
  * listings – and saves the suggested selectors back to the DB for next time.
  */
-export async function scrapeCustom(
-  scraper: ScraperRow
-): Promise<ScrapedJob[]> {
+export async function scrapeCustom(scraper: ScraperRow): Promise<ScrapedJob[]> {
   const url = scraper.url;
   if (!url) {
     console.warn(`  Custom scraper "${scraper.name}" has no URL`);
@@ -75,26 +73,21 @@ export async function scrapeCustom(
 // Internals
 // ---------------------------------------------------------------------------
 
-async function extractWithSelectors(
-  page: any,
-  scraper: ScraperRow
-): Promise<ScrapedJob[]> {
+async function extractWithSelectors(page: Page, scraper: ScraperRow): Promise<ScrapedJob[]> {
   const s = scraper.selectors!;
 
   return page.evaluate(
     (selectors: Record<string, string>, source: string) => {
       const titleEls = document.querySelectorAll(selectors.titleSelector);
-      const jobs: any[] = [];
+      const jobs: ScrapedJob[] = [];
 
       titleEls.forEach((titleEl: Element) => {
         // Walk up to the nearest common ancestor (card container)
-        const card = titleEl.closest(
-          selectors.cardSelector || "div,li,article"
-        );
+        const card = titleEl.closest(selectors.cardSelector || "div,li,article");
         if (!card) return;
 
         const get = (sel: string) =>
-          sel ? card.querySelector(sel)?.textContent?.trim() ?? "" : "";
+          sel ? (card.querySelector(sel)?.textContent?.trim() ?? "") : "";
 
         const title = titleEl.textContent?.trim() ?? "";
         if (!title) return;
@@ -103,10 +96,7 @@ async function extractWithSelectors(
           title,
           company: get(selectors.companySelector),
           location: get(selectors.locationSelector),
-          url:
-            (titleEl as HTMLAnchorElement).href ||
-            get(selectors.urlSelector) ||
-            "",
+          url: (titleEl as HTMLAnchorElement).href || get(selectors.urlSelector) || "",
           description: get(selectors.descriptionSelector),
           source,
         });
@@ -124,10 +114,35 @@ interface AIExtractResult {
   selectors: Record<string, string> | null;
 }
 
-async function analyzeWithAI(
-  pageText: string,
+interface AIJobShape {
+  title?: unknown;
+  company?: unknown;
+  location?: unknown;
+  url?: unknown;
+  description?: unknown;
+}
+
+/**
+ * Map a parsed AI response into the internal result shape. Pure function for
+ * testability; `analyzeWithAI` calls it after JSON parsing.
+ */
+export function mapAIExtractResult(
+  parsed: { jobs?: AIJobShape[]; selectors?: Record<string, string> | null },
   sourceName: string
-): Promise<AIExtractResult> {
+): AIExtractResult {
+  const jobs: ScrapedJob[] = (parsed?.jobs || []).map((j) => ({
+    title: typeof j?.title === "string" ? j.title : "",
+    company: typeof j?.company === "string" ? j.company : "",
+    location: typeof j?.location === "string" ? j.location : "",
+    url: typeof j?.url === "string" ? j.url : "",
+    description: (typeof j?.description === "string" ? j.description : "").substring(0, 500),
+    source: sourceName,
+  }));
+
+  return { jobs, selectors: parsed?.selectors || null };
+}
+
+async function analyzeWithAI(pageText: string, sourceName: string): Promise<AIExtractResult> {
   const prompt = `You are a web-scraping expert. Below is the visible text of a job-listing page.
 
 Your tasks:
@@ -164,17 +179,7 @@ ${pageText}`;
   try {
     const content = response.choices[0]?.message?.content || "{}";
     const parsed = JSON.parse(content.trim());
-
-    const jobs: ScrapedJob[] = (parsed.jobs || []).map((j: any) => ({
-      title: j.title || "",
-      company: j.company || "",
-      location: j.location || "",
-      url: j.url || "",
-      description: (j.description || "").substring(0, 500),
-      source: sourceName,
-    }));
-
-    return { jobs, selectors: parsed.selectors || null };
+    return mapAIExtractResult(parsed, sourceName);
   } catch {
     console.warn("  AI selectors: failed to parse response, returning empty");
     return { jobs: [], selectors: null };

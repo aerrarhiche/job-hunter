@@ -1,6 +1,7 @@
 import type { ScrapedJob } from "../scrapers/types.js";
 import { insertJob, urlExists, insertAuditLog } from "../db/client.js";
 import { scoreJob, generateScoringReport } from "../agent/scorer.js";
+import { applyHardPenalties } from "./scoring-rules.js";
 
 /** Debug limit — set to 0 for unlimited processing */
 export const DEBUG_JOB_LIMIT = 0;
@@ -9,52 +10,6 @@ export interface ScoreAndStoreOptions {
   runId: number;
   minScore: number;
   step: string;
-}
-
-/**
- * Apply hard programmatic penalties that the LLM tends to overlook.
- * These are non-negotiable constraints from soul.md.
- */
-function applyHardPenalties(llmScore: number, job: ScrapedJob): number {
-  let penalty = 0;
-  const reasons: string[] = [];
-
-  // 1. Remote-only requirement: if location doesn't mention "remote", dock 30 points
-  const loc = (job.location || "").toLowerCase();
-  if (loc && !loc.includes("remote")) {
-    penalty += 30;
-    reasons.push("on-site/no-remote (-30)");
-  }
-
-  // 2. Salary floor: below $120K minimum, dock 20 points
-  if (job.salaryMin != null && job.salaryMin > 0 && job.salaryMin < 120000) {
-    penalty += 20;
-    reasons.push(`salary $${(job.salaryMin / 1000).toFixed(0)}K < $120K (-20)`);
-  }
-
-  // 3. Non-target role titles: dock 25 points
-  const nonTargetPatterns = [
-    /\bbackend\b/i, /\binfrastructure\b/i, /\bplatform\b/i,
-    /\bdata engineer\b/i, /\bdata scientist\b/i, /\bml engineer\b/i,
-    /\bdevops\b/i, /\bqa\b/i, /\bmobile\b/i,
-    /\bstaff\b/i, /\bclinical\b/i, /\bsupport\b/i,
-  ];
-  const titleLower = job.title.toLowerCase();
-  const isNonTarget = nonTargetPatterns.some((p) => p.test(titleLower));
-  // But don't penalize if it also contains "founding" or "full-stack" or "full stack"
-  const isTargetOverride = /\bfounding\b|\bfull.stack\b|\bfullstack\b|\bproduct engineer\b/i.test(titleLower);
-  if (isNonTarget && !isTargetOverride) {
-    penalty += 25;
-    reasons.push(`non-target role (-25)`);
-  }
-
-  if (penalty > 0) {
-    const final = Math.max(0, llmScore - penalty);
-    console.log(`  [penalty] "${job.title}" @ ${job.company}: LLM ${llmScore} → ${final} (${reasons.join(", ")})`);
-    return final;
-  }
-
-  return llmScore;
 }
 
 /**
@@ -72,7 +27,9 @@ export async function scoreAndStoreJobs(
 
   // ── Pass 1: Fast filter ──────────────────────────────────────
   await insertAuditLog(
-    opts.runId, step1, "running",
+    opts.runId,
+    step1,
+    "running",
     `Fast-scoring ${jobs.length} jobs (no research, quick filter)...`
   );
 
@@ -98,8 +55,13 @@ export async function scoreAndStoreJobs(
       location: job.location,
     });
 
-    // Apply hard programmatic penalties on top of LLM score
-    const score = applyHardPenalties(llmScore, job);
+    // Apply hard programmatic penalties on top of the LLM score
+    const { score, penalties } = applyHardPenalties(llmScore, job);
+    if (penalties.length > 0) {
+      console.log(
+        `  [penalty] "${job.title}" @ ${job.company}: LLM ${llmScore} → ${score} (${penalties.join(", ")})`
+      );
+    }
 
     if (score < opts.minScore) {
       belowThreshold++;
@@ -108,12 +70,16 @@ export async function scoreAndStoreJobs(
 
     survivors.push({ job, score, reason });
     if (survivors.length % 10 === 0) {
-      console.log(`  [pass1] ${survivors.length} survivors so far (${i + 1}/${jobs.length} checked)...`);
+      console.log(
+        `  [pass1] ${survivors.length} survivors so far (${i + 1}/${jobs.length} checked)...`
+      );
     }
   }
 
   await insertAuditLog(
-    opts.runId, step1, "completed",
+    opts.runId,
+    step1,
+    "completed",
     `${survivors.length} passed filter (${belowThreshold} < ${opts.minScore}, ${duplicates} duplicates)`,
     { total: jobs.length, passed: survivors.length, belowThreshold, duplicates }
   );
@@ -125,7 +91,9 @@ export async function scoreAndStoreJobs(
 
   // ── Pass 2: Detailed reports (concurrent) ────────────────────
   await insertAuditLog(
-    opts.runId, step2, "running",
+    opts.runId,
+    step2,
+    "running",
     `Generating detailed reports for ${survivors.length} survivors (3 concurrent)...`
   );
 
@@ -136,62 +104,71 @@ export async function scoreAndStoreJobs(
     const batch = survivors.slice(i, i + REPORT_CONCURRENCY);
 
     await Promise.all(
-      batch.map(async ({ job, score, reason }) => {
+      batch.map(async ({ job }) => {
         try {
-        const report = await generateScoringReport({
-          title: job.title,
-          company: job.company,
-          description: job.description,
-          metadata: job.metadata,
-          salaryMin: job.salaryMin,
-          salaryMax: job.salaryMax,
-          location: job.location,
-        });
+          const report = await generateScoringReport({
+            title: job.title,
+            company: job.company,
+            description: job.description,
+            metadata: job.metadata,
+            salaryMin: job.salaryMin,
+            salaryMax: job.salaryMax,
+            location: job.location,
+          });
 
-        const enrichedMetadata = {
-          ...(job.metadata ?? {}),
-          companySize: report.company_size || undefined,
-        };
+          const enrichedMetadata = {
+            ...(job.metadata ?? {}),
+            companySize: report.company_size || undefined,
+          };
 
-        // Reject jobs where the report generation failed (LLM returned fallback)
-        if (report.summary === "Failed to generate scoring report.") {
-          console.warn(`  [pass2] Skipping "${job.title}" @ ${job.company}: report generation failed`);
-          return;
-        }
+          // Reject jobs where the report generation failed (LLM returned fallback)
+          if (report.summary === "Failed to generate scoring report.") {
+            console.warn(
+              `  [pass2] Skipping "${job.title}" @ ${job.company}: report generation failed`
+            );
+            return;
+          }
 
-        // Detect fake-remote: location says Remote but report mentions relocation/on-site
-        const reportText = report.summary + " " +
-          (report.categories || []).map((c: any) => c.explanation || "").join(" ");
-        const relocationPatterns = /mandatory relocation|must relocate|required to relocate|on.site only|in.person only|no remote/i;
-        const locLower = (job.location || "").toLowerCase();
-        if (locLower.includes("remote") && relocationPatterns.test(reportText)) {
-          console.warn(`  [pass2] Skipping "${job.title}" @ ${job.company}: fake remote (relocation required per report)`);
-          return;
-        }
+          // Detect fake-remote: location says Remote but report mentions relocation/on-site
+          const reportText =
+            report.summary +
+            " " +
+            (report.categories || []).map((c) => c.explanation || "").join(" ");
+          const relocationPatterns =
+            /mandatory relocation|must relocate|required to relocate|on.site only|in.person only|no remote/i;
+          const locLower = (job.location || "").toLowerCase();
+          if (locLower.includes("remote") && relocationPatterns.test(reportText)) {
+            console.warn(
+              `  [pass2] Skipping "${job.title}" @ ${job.company}: fake remote (relocation required per report)`
+            );
+            return;
+          }
 
-        // Use the detailed report's score as the canonical score (more accurate than Pass 1)
-        const finalScore = report.overall_score;
+          // Use the detailed report's score as the canonical score (more accurate than Pass 1)
+          const finalScore = report.overall_score;
 
-        await insertJob({
-          title: job.title,
-          company: job.company,
-          location: job.location,
-          url: job.url,
-          source: job.source,
-          description: job.description,
-          salary_min: job.salaryMin ?? null,
-          salary_max: job.salaryMax ?? null,
-          posted_date: job.postedDate ?? null,
-          score: finalScore,
-          score_reason: report.summary,
-          status: "new",
-          metadata: enrichedMetadata as any,
-          scoring_report: report as any,
-        });
+          await insertJob({
+            title: job.title,
+            company: job.company,
+            location: job.location,
+            url: job.url,
+            source: job.source,
+            description: job.description,
+            salary_min: job.salaryMin ?? null,
+            salary_max: job.salaryMax ?? null,
+            posted_date: job.postedDate ?? null,
+            score: finalScore,
+            score_reason: report.summary,
+            status: "new",
+            metadata: enrichedMetadata as unknown as Record<string, unknown>,
+            scoring_report: report as unknown as Record<string, unknown>,
+          });
 
-        stored++;
+          stored++;
         } catch (err) {
-          console.warn(`  [pass2] Report failed for "${job.title}" @ ${job.company}: ${(err as Error).message}`);
+          console.warn(
+            `  [pass2] Report failed for "${job.title}" @ ${job.company}: ${(err as Error).message}`
+          );
         }
       })
     );
@@ -201,7 +178,9 @@ export async function scoreAndStoreJobs(
   }
 
   await insertAuditLog(
-    opts.runId, step2, "completed",
+    opts.runId,
+    step2,
+    "completed",
     `${stored} detailed reports generated and stored`,
     { stored }
   );
@@ -226,7 +205,9 @@ export async function withRetry<T>(
       lastErr = err as Error;
       if (attempt < maxRetries) {
         const delay = baseDelayMs * Math.pow(2, attempt);
-        console.warn(`  [retry] attempt ${attempt + 1}/${maxRetries} failed, retrying in ${delay}ms: ${lastErr.message}`);
+        console.warn(
+          `  [retry] attempt ${attempt + 1}/${maxRetries} failed, retrying in ${delay}ms: ${lastErr.message}`
+        );
         await new Promise((r) => setTimeout(r, delay));
       }
     }
