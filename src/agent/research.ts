@@ -1,5 +1,6 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
+import { logger } from "../logger.js";
 
 /** Global circuit-breaker: after N companies fail, skip all research for this run */
 let globalFailures = 0;
@@ -41,7 +42,7 @@ export async function researchCompany(
   for (const query of queries) {
     // Circuit breaker: if first 2 queries fail, skip the rest
     if (consecutiveFailures >= 2) {
-      console.warn(`  [research] Skipping remaining queries for ${company} (DDG unreachable)`);
+      logger.warn(`  [research] Skipping remaining queries for ${company} (DDG unreachable)`);
       break;
     }
 
@@ -57,7 +58,7 @@ export async function researchCompany(
       }
     } catch (err) {
       consecutiveFailures++;
-      console.warn(`  [research] query "${query}" failed: ${(err as Error).message}`);
+      logger.warn(`  [research] query "${query}" failed: ${(err as Error).message}`);
     }
   }
 
@@ -65,7 +66,7 @@ export async function researchCompany(
   if (allSnippets.length === 0) {
     globalFailures++;
     if (globalFailures >= GLOBAL_CIRCUIT_BREAKER) {
-      console.warn(
+      logger.warn(
         `  [research] DDG unreachable for ${GLOBAL_CIRCUIT_BREAKER} companies — disabling research for rest of run`
       );
     }

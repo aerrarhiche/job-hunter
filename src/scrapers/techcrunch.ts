@@ -1,4 +1,5 @@
 import axios from "axios";
+import { logger } from "../logger.js";
 
 export interface FundingRound {
   company: string;
@@ -34,7 +35,7 @@ export async function checkTechCrunchFunding(): Promise<FundingRound[]> {
     });
     return parseFundingRss(data);
   } catch (err) {
-    console.warn("TechCrunch scraper failed:", (err as Error).message);
+    logger.warn({ err }, "TechCrunch scraper failed");
     return [];
   }
 }

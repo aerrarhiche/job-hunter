@@ -4,6 +4,7 @@ import { cfg } from "../config.js";
 import type { ScrapedJob } from "./types.js";
 import { updateScraperSelectors } from "../db/client.js";
 import type { ScraperRow } from "../db/client.js";
+import { logger } from "../logger.js";
 
 const ai = new OpenAI({
   apiKey: cfg.deepseek.apiKey,
@@ -20,11 +21,11 @@ const ai = new OpenAI({
 export async function scrapeCustom(scraper: ScraperRow): Promise<ScrapedJob[]> {
   const url = scraper.url;
   if (!url) {
-    console.warn(`  Custom scraper "${scraper.name}" has no URL`);
+    logger.warn(`  Custom scraper "${scraper.name}" has no URL`);
     return [];
   }
 
-  console.log(`  Custom "${scraper.name}": launching browser for ${url}...`);
+  logger.info(`  Custom "${scraper.name}": launching browser for ${url}...`);
   const browser = await puppeteer.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
@@ -37,7 +38,7 @@ export async function scrapeCustom(scraper: ScraperRow): Promise<ScrapedJob[]> {
     // --- Path A: selectors already known from DB or a previous AI run ---
     if (scraper.selectors && Object.keys(scraper.selectors).length > 0) {
       const jobs = await extractWithSelectors(page, scraper);
-      console.log(`  Custom "${scraper.name}": found ${jobs.length} jobs via selectors`);
+      logger.info(`  Custom "${scraper.name}": found ${jobs.length} jobs via selectors`);
       return jobs;
     }
 
@@ -52,17 +53,17 @@ export async function scrapeCustom(scraper: ScraperRow): Promise<ScrapedJob[]> {
     if (aiResult.selectors && Object.keys(aiResult.selectors).length > 0) {
       // Persist the selectors so future runs skip the AI call
       await updateScraperSelectors(scraper.id, aiResult.selectors).catch((err) =>
-        console.warn(`  Failed to save selectors for "${scraper.name}":`, err)
+        logger.warn({ err, scraper: scraper.name }, "Failed to save selectors")
       );
     }
 
-    console.log(
+    logger.info(
       `  Custom "${scraper.name}": AI found ${aiResult.jobs.length} jobs` +
         (aiResult.selectors ? " (selectors saved)" : "")
     );
     return aiResult.jobs;
   } catch (err) {
-    console.warn(`  Custom scraper "${scraper.name}":`, (err as Error).message);
+    logger.warn({ err, scraper: scraper.name }, "Custom scraper failed");
     return [];
   } finally {
     await browser.close();
@@ -181,7 +182,7 @@ ${pageText}`;
     const parsed = JSON.parse(content.trim());
     return mapAIExtractResult(parsed, sourceName);
   } catch {
-    console.warn("  AI selectors: failed to parse response, returning empty");
+    logger.warn("  AI selectors: failed to parse response, returning empty");
     return { jobs: [], selectors: null };
   }
 }

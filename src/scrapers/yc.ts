@@ -17,6 +17,7 @@
 import puppeteer, { Browser, type Page, type HTTPRequest } from "puppeteer";
 import type { ScrapedJob, ScrapedJobMetadata } from "./types.js";
 import { DEBUG_JOB_LIMIT } from "../agent/pipeline.js";
+import { logger } from "../logger.js";
 
 const DETAIL_DELAY_MS = 200;
 const SCROLL_COUNT = 2;
@@ -52,7 +53,7 @@ async function audit(
     const { insertAuditLog } = await import("../db/client.js");
     await insertAuditLog(runId, step, status, message, details);
   } catch (err) {
-    console.warn(`  [yc audit] "${step}": ${(err as Error).message}`);
+    logger.warn(`  [yc audit] "${step}": ${(err as Error).message}`);
   }
 }
 
@@ -73,7 +74,7 @@ export async function scrapeYC(runId?: number): Promise<ScrapedJob[]> {
   cutoff.setDate(cutoff.getDate() - 30);
   const CUTOFF_DATE = cutoff.toISOString().split("T")[0];
 
-  console.log("  YC: launching headless browser...");
+  logger.info("  YC: launching headless browser...");
   const browser = await puppeteer.launch({
     headless: true,
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
@@ -88,7 +89,7 @@ export async function scrapeYC(runId?: number): Promise<ScrapedJob[]> {
   try {
     const { cfg } = await import("../config.js");
     if (!cfg.yc.email || !cfg.yc.password) {
-      console.warn("  YC: credentials not set. Skipping.");
+      logger.warn("  YC: credentials not set. Skipping.");
       return [];
     }
 
@@ -98,7 +99,7 @@ export async function scrapeYC(runId?: number): Promise<ScrapedJob[]> {
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     );
 
-    console.log("  YC: logging in...");
+    logger.info("  YC: logging in...");
     await loginPage.goto(
       "https://account.ycombinator.com/?continue=" +
         encodeURIComponent("https://www.workatastartup.com/jobs"),
@@ -125,9 +126,9 @@ export async function scrapeYC(runId?: number): Promise<ScrapedJob[]> {
     const companiesUrls: TaggedUrl[] = results[0].status === "fulfilled" ? results[0].value : [];
     const jobsUrls: TaggedUrl[] = results[1].status === "fulfilled" ? results[1].value : [];
     if (results[0].status === "rejected")
-      console.warn(`  YC /companies flow failed: ${(results[0].reason as Error).message}`);
+      logger.warn(`  YC /companies flow failed: ${(results[0].reason as Error).message}`);
     if (results[1].status === "rejected")
-      console.warn(`  YC /jobs flow failed: ${(results[1].reason as Error).message}`);
+      logger.warn(`  YC /jobs flow failed: ${(results[1].reason as Error).message}`);
 
     // ── Merge + dedupe (preserve flow info) ────────────────────────
     const seen = new Set<string>();
@@ -138,7 +139,7 @@ export async function scrapeYC(runId?: number): Promise<ScrapedJob[]> {
         allTagged.push(t);
       }
     }
-    console.log(
+    logger.info(
       `  YC: ${companiesUrls.length}/c + ${jobsUrls.length}/j = ${allTagged.length} unique`
     );
     await audit(
@@ -162,14 +163,14 @@ export async function scrapeYC(runId?: number): Promise<ScrapedJob[]> {
     const jobs = await extractDetails(browser, allTagged.slice(0, limit), CUTOFF_DATE);
     const elapsed = ((Date.now() - start) / 1000).toFixed(1);
 
-    console.log(`  YC: extracted ${jobs.length} jobs in ${elapsed}s`);
+    logger.info(`  YC: extracted ${jobs.length} jobs in ${elapsed}s`);
     await audit(runId, "yc:details", "completed", `${jobs.length} jobs extracted`, {
       count: jobs.length,
       elapsed_sec: parseFloat(elapsed),
     });
     return jobs;
   } catch (err) {
-    console.warn("YC scraper:", (err as Error).message);
+    logger.warn({ err }, "YC scraper failed");
     return [];
   } finally {
     await browser.close();
@@ -359,7 +360,7 @@ async function extractDetails(
           if (!detail.isOld) {
             // Skip US citizen/visa only jobs immediately
             if (detail.usOnly) {
-              console.log(`  YC skipped (US-only): ${detail.title} @ ${detail.company}`);
+              logger.info(`  YC skipped (US-only): ${detail.title} @ ${detail.company}`);
               continue;
             }
 
@@ -377,7 +378,7 @@ async function extractDetails(
             });
           }
         } catch (err) {
-          console.warn(`  YC detail failed: ${(err as Error).message}`);
+          logger.warn(`  YC detail failed: ${(err as Error).message}`);
         }
         if (queue.length > 0) await new Promise((r) => setTimeout(r, DETAIL_DELAY_MS));
       }
@@ -417,7 +418,7 @@ async function scrapeCompaniesFlow(
           n++;
         }
       }
-      console.log(
+      logger.info(
         `  YC /companies: "${batch[j]}" — ${batchUrls.length} links, ${n} new (total: ${urls.length})`
       );
     }
@@ -498,12 +499,12 @@ async function scrapeJobsFlow(
   });
 
   for (const role of roles) {
-    console.log(`  YC /jobs: searching "${role}"...`);
+    logger.info(`  YC /jobs: searching "${role}"...`);
     await audit(runId, `yc:search:B:${role}`, "running", `[Flow B] searching "${role}"...`);
     try {
       const ta = await page.$("textarea");
       if (!ta) {
-        console.warn("    no textarea, skipping");
+        logger.warn("    no textarea, skipping");
         continue;
       }
 
@@ -521,7 +522,7 @@ async function scrapeJobsFlow(
         new Promise<boolean>((r) => setTimeout(() => r(false), 12000)),
       ]);
       if (!appeared) {
-        console.warn("    results did not load, skipping");
+        logger.warn("    results did not load, skipping");
         continue;
       }
 
@@ -552,7 +553,7 @@ async function scrapeJobsFlow(
           n++;
         }
       }
-      console.log(`    ${batch.length} links, ${n} new (total: ${urls.length})`);
+      logger.info(`    ${batch.length} links, ${n} new (total: ${urls.length})`);
       await audit(
         runId,
         `yc:search:B:${role}`,
@@ -560,7 +561,7 @@ async function scrapeJobsFlow(
         `[Flow B] "${role}" → ${batch.length} links (${n} new)`
       );
     } catch (err) {
-      console.warn(`    /jobs "${role}" failed: ${(err as Error).message}`);
+      logger.warn(`    /jobs "${role}" failed: ${(err as Error).message}`);
     }
   }
   await page.close();

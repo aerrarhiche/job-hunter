@@ -2,6 +2,7 @@ import { config as loadDotenv } from "dotenv";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import { parseEnv } from "./env.js";
+import { logger } from "./logger.js";
 
 loadDotenv({ path: resolve(__dirname, "../.env") });
 
@@ -23,7 +24,7 @@ export function loadResume(): string {
   try {
     return readFileSync(cfg.resumePath, "utf-8");
   } catch {
-    console.warn("No resume found at", cfg.resumePath);
+    logger.warn({ path: cfg.resumePath }, "No resume found");
     return "";
   }
 }
@@ -32,7 +33,7 @@ export function loadSoul(): string {
   try {
     return readFileSync(cfg.soulPath, "utf-8");
   } catch {
-    console.warn("No soul.md found at", cfg.soulPath);
+    logger.warn({ path: cfg.soulPath }, "No soul.md found");
     return "";
   }
 }

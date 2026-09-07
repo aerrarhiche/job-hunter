@@ -1,7 +1,8 @@
 import type { ScrapedJob } from "../scrapers/types.js";
-import { insertJob, urlExists, insertAuditLog } from "../db/client.js";
+import { insertJob, getExistingUrls, insertAuditLog } from "../db/client.js";
 import { scoreJob, generateScoringReport } from "../agent/scorer.js";
 import { applyHardPenalties } from "./scoring-rules.js";
+import { logger } from "../logger.js";
 
 /** Debug limit — set to 0 for unlimited processing */
 export const DEBUG_JOB_LIMIT = 0;
@@ -34,13 +35,14 @@ export async function scoreAndStoreJobs(
   );
 
   const survivors: { job: ScrapedJob; score: number; reason: string }[] = [];
+  const existingUrls = await getExistingUrls(jobs.map((j) => j.url));
   let duplicates = 0;
   let belowThreshold = 0;
 
   for (let i = 0; i < jobs.length; i++) {
     const job = jobs[i];
 
-    if (await urlExists(job.url)) {
+    if (existingUrls.has(job.url)) {
       duplicates++;
       continue;
     }
@@ -58,7 +60,7 @@ export async function scoreAndStoreJobs(
     // Apply hard programmatic penalties on top of the LLM score
     const { score, penalties } = applyHardPenalties(llmScore, job);
     if (penalties.length > 0) {
-      console.log(
+      logger.info(
         `  [penalty] "${job.title}" @ ${job.company}: LLM ${llmScore} → ${score} (${penalties.join(", ")})`
       );
     }
@@ -70,7 +72,7 @@ export async function scoreAndStoreJobs(
 
     survivors.push({ job, score, reason });
     if (survivors.length % 10 === 0) {
-      console.log(
+      logger.info(
         `  [pass1] ${survivors.length} survivors so far (${i + 1}/${jobs.length} checked)...`
       );
     }
@@ -85,7 +87,7 @@ export async function scoreAndStoreJobs(
   );
 
   if (survivors.length === 0) {
-    console.log("  No jobs passed the fast filter — pipeline done.");
+    logger.info("  No jobs passed the fast filter — pipeline done.");
     return { stored: 0, skipped: belowThreshold };
   }
 
@@ -123,7 +125,7 @@ export async function scoreAndStoreJobs(
 
           // Reject jobs where the report generation failed (LLM returned fallback)
           if (report.summary === "Failed to generate scoring report.") {
-            console.warn(
+            logger.warn(
               `  [pass2] Skipping "${job.title}" @ ${job.company}: report generation failed`
             );
             return;
@@ -138,7 +140,7 @@ export async function scoreAndStoreJobs(
             /mandatory relocation|must relocate|required to relocate|on.site only|in.person only|no remote/i;
           const locLower = (job.location || "").toLowerCase();
           if (locLower.includes("remote") && relocationPatterns.test(reportText)) {
-            console.warn(
+            logger.warn(
               `  [pass2] Skipping "${job.title}" @ ${job.company}: fake remote (relocation required per report)`
             );
             return;
@@ -166,7 +168,7 @@ export async function scoreAndStoreJobs(
 
           stored++;
         } catch (err) {
-          console.warn(
+          logger.warn(
             `  [pass2] Report failed for "${job.title}" @ ${job.company}: ${(err as Error).message}`
           );
         }
@@ -174,7 +176,7 @@ export async function scoreAndStoreJobs(
     );
 
     const done = Math.min(i + REPORT_CONCURRENCY, survivors.length);
-    console.log(`  [pass2] ${done}/${survivors.length} detailed reports done...`);
+    logger.info(`  [pass2] ${done}/${survivors.length} detailed reports done...`);
   }
 
   await insertAuditLog(
@@ -205,7 +207,7 @@ export async function withRetry<T>(
       lastErr = err as Error;
       if (attempt < maxRetries) {
         const delay = baseDelayMs * Math.pow(2, attempt);
-        console.warn(
+        logger.warn(
           `  [retry] attempt ${attempt + 1}/${maxRetries} failed, retrying in ${delay}ms: ${lastErr.message}`
         );
         await new Promise((r) => setTimeout(r, delay));

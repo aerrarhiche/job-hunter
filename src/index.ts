@@ -1,8 +1,9 @@
 import { CronJob } from "cron";
 import { cfg } from "./config.js";
+import { logger } from "./logger.js";
 import {
   pool,
-  urlExists,
+  getExistingUrls,
   getActiveScrapers,
   createScoutRun,
   updateScoutRun,
@@ -12,7 +13,7 @@ import {
 } from "./db/client.js";
 import { scoreAndStoreJobs } from "./agent/pipeline.js";
 import { filterJobs, dedupeJobs, type SearchConfig } from "./agent/filter.js";
-import { DEFAULT_API_PORT } from "./constants.js";
+import { DEFAULT_API_PORT, GRACEFUL_SHUTDOWN_TIMEOUT_MS } from "./constants.js";
 import { runScraper } from "./scout/run-scraper.js";
 import { checkTechCrunchFunding } from "./scrapers/techcrunch.js";
 import { startBot, sendDailyBrief } from "./telegram/bot.js";
@@ -53,20 +54,20 @@ async function loadSearchConfig(): Promise<SearchConfig> {
 
 async function scout(): Promise<void> {
   const startedAt = new Date().toISOString();
-  console.log(`\n=== Job Scout Run: ${startedAt} ===\n`);
+  logger.info(`\n=== Job Scout Run: ${startedAt} ===\n`);
 
   const runId = await createScoutRun();
   await insertAuditLog(runId, "pipeline", "running", "Scout pipeline started");
 
   const searchConfig = await loadSearchConfig();
-  console.log(`Roles: ${searchConfig.roleTitles.join(", ")}`);
-  console.log(`Must have: ${searchConfig.mustHave.join(", ")}`);
-  console.log(`Min score: ${searchConfig.minScore}`);
-  console.log(`Excluding: ${searchConfig.excludeKeywords.join(", ")}`);
+  logger.info(`Roles: ${searchConfig.roleTitles.join(", ")}`);
+  logger.info(`Must have: ${searchConfig.mustHave.join(", ")}`);
+  logger.info(`Min score: ${searchConfig.minScore}`);
+  logger.info(`Excluding: ${searchConfig.excludeKeywords.join(", ")}`);
 
   // 1. Read active scrapers
   const scrapers = await getActiveScrapers();
-  console.log(`Active scrapers: ${scrapers.map((s) => `${s.name} (${s.type})`).join(", ")}`);
+  logger.info(`Active scrapers: ${scrapers.map((s) => `${s.name} (${s.type})`).join(", ")}`);
   await insertAuditLog(runId, "init", "completed", `${scrapers.length} active scrapers`, {
     scrapers: scrapers.map((s) => s.name),
   });
@@ -78,9 +79,9 @@ async function scout(): Promise<void> {
   let customJobs = 0;
 
   for (const scraper of scrapers) {
-    console.log(`\nRunning: ${scraper.name}...`);
+    logger.info(`\nRunning: ${scraper.name}...`);
     const jobs = await runScraper(scraper, runId);
-    console.log(`  ${scraper.name}: ${jobs.length} jobs`);
+    logger.info(`  ${scraper.name}: ${jobs.length} jobs`);
     allJobs.push(...jobs);
 
     if (scraper.type === "yc") ycJobs += jobs.length;
@@ -102,22 +103,22 @@ async function scout(): Promise<void> {
   );
 
   // 3. TechCrunch funding check
-  console.log("\nChecking TechCrunch for new funding...");
+  logger.info("\nChecking TechCrunch for new funding...");
   await insertAuditLog(runId, "funding", "running", "Checking TechCrunch...");
   const fundingRounds = await checkTechCrunchFunding();
-  console.log(`  Found ${fundingRounds.length} recent funding events`);
+  logger.info(`  Found ${fundingRounds.length} recent funding events`);
   await insertAuditLog(runId, "funding", "completed", `${fundingRounds.length} funding events`, {
     count: fundingRounds.length,
   });
 
   // 4. Merge and dedupe
   const unique = dedupeJobs(allJobs);
-  console.log(`\nTotal unique jobs: ${unique.length}`);
+  logger.info(`\nTotal unique jobs: ${unique.length}`);
   await insertAuditLog(runId, "dedupe", "completed", `${unique.length} unique jobs`);
 
   // 5. Filter by hard criteria
   const filtered = filterJobs(unique, searchConfig);
-  console.log(`After hard filters: ${filtered.length}`);
+  logger.info(`After hard filters: ${filtered.length}`);
   await insertAuditLog(
     runId,
     "filter",
@@ -126,12 +127,9 @@ async function scout(): Promise<void> {
   );
 
   // 6. Dedupe against DB
-  let newCount = 0;
-  for (const job of filtered) {
-    if (await urlExists(job.url)) continue;
-    newCount++;
-  }
-  console.log(`New jobs (not in DB): ${newCount}`);
+  const existingUrls = await getExistingUrls(filtered.map((j) => j.url));
+  const newCount = filtered.filter((j) => !existingUrls.has(j.url)).length;
+  logger.info(`New jobs (not in DB): ${newCount}`);
   await insertAuditLog(runId, "db_check", "completed", `${newCount} new jobs not yet in database`);
 
   // 7. Score and insert (only keep score >= minScore)
@@ -141,7 +139,7 @@ async function scout(): Promise<void> {
     step: "scoring",
   });
 
-  console.log(
+  logger.info(
     `\nScored and stored: ${scored} jobs (${skipped} below threshold of ${searchConfig.minScore})`
   );
   await insertAuditLog(
@@ -158,8 +156,8 @@ async function scout(): Promise<void> {
 
   // 8. Show funding alerts
   if (fundingRounds.length > 0) {
-    console.log("\nRecent funding rounds (check these companies for job postings):");
-    fundingRounds.forEach((r) => console.log(`  ${r.company}: ${r.url}`));
+    logger.info("\nRecent funding rounds (check these companies for job postings):");
+    fundingRounds.forEach((r) => logger.info(`  ${r.company}: ${r.url}`));
   }
 
   // 9. Update scout run record
@@ -183,7 +181,7 @@ async function scout(): Promise<void> {
   // 10. Send brief
   await sendDailyBrief();
 
-  console.log("\n=== Scout Complete ===\n");
+  logger.info("\n=== Scout Complete ===\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -192,23 +190,23 @@ async function scout(): Promise<void> {
 
 async function main(): Promise<void> {
   if (!cfg.deepseek.apiKey) {
-    console.error("DEEPSEEK_API_KEY is required. Add it to .env (see .env.example).");
+    logger.error("DEEPSEEK_API_KEY is required. Add it to .env (see .env.example).");
     process.exit(1);
   }
-  console.log("Job Agent starting...");
-  console.log(`Using DeepSeek @ ${cfg.deepseek.baseUrl}`);
-  console.log(
+  logger.info("Job Agent starting...");
+  logger.info(`Using DeepSeek @ ${cfg.deepseek.baseUrl}`);
+  logger.info(
     `Daily run: ${cfg.schedule.hour}:${String(cfg.schedule.minute).padStart(2, "0")} UTC`
   );
-  console.log(`Min score threshold: ${cfg.search.minScore}`);
-  console.log(`Excluding keywords: ${cfg.search.excludeKeywords.join(", ")}`);
-  console.log(`Target roles: ${cfg.search.roleTitles.join(", ")}`);
+  logger.info(`Min score threshold: ${cfg.search.minScore}`);
+  logger.info(`Excluding keywords: ${cfg.search.excludeKeywords.join(", ")}`);
+  logger.info(`Target roles: ${cfg.search.roleTitles.join(", ")}`);
 
   try {
     await pool.query("SELECT 1");
-    console.log("Postgres connected");
+    logger.info("Postgres connected");
   } catch (err) {
-    console.error("Postgres connection failed:", err);
+    logger.error({ err }, "Postgres connection failed");
     process.exit(1);
   }
 
@@ -222,26 +220,56 @@ async function main(): Promise<void> {
 
   const app = createServer();
   const PORT = parseInt(process.env.API_PORT || String(DEFAULT_API_PORT), 10);
-  app.listen(PORT, () => {
-    console.log(`API server listening on http://0.0.0.0:${PORT}`);
+  const server = app.listen(PORT, () => {
+    logger.info(`API server listening on http://0.0.0.0:${PORT}`);
   });
 
+  let bot: ReturnType<typeof startBot> = null;
   try {
-    startBot();
+    bot = startBot();
   } catch (err) {
-    console.warn("Telegram bot failed to start:", err);
+    logger.warn({ err }, "Telegram bot failed to start");
   }
 
   const cronTime = `${cfg.schedule.minute} ${cfg.schedule.hour} * * *`;
-  console.log(`Scheduling: ${cronTime}`);
+  logger.info(`Scheduling: ${cronTime}`);
 
   const job = new CronJob(cronTime, scout);
   job.start();
 
-  console.log("Job Agent ready. Waiting for scheduled run...\n");
+  logger.info("Job Agent ready. Waiting for scheduled run...");
+
+  // Graceful shutdown: stop cron, stop Telegram polling, close HTTP server,
+  // then drain the Postgres pool before exiting.
+  let shuttingDown = false;
+  const shutdown = (signal: string): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info({ signal }, "Shutting down gracefully...");
+
+    job.stop();
+    if (bot) void bot.stopPolling();
+
+    const forceExit = setTimeout(() => {
+      logger.warn("Forced shutdown after timeout");
+      process.exit(1);
+    }, GRACEFUL_SHUTDOWN_TIMEOUT_MS);
+    forceExit.unref();
+
+    server.close(() => {
+      void pool.end().then(() => {
+        clearTimeout(forceExit);
+        logger.info("Shutdown complete");
+        process.exit(0);
+      });
+    });
+  };
+
+  process.once("SIGINT", () => shutdown("SIGINT"));
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
 }
 
 main().catch((err) => {
-  console.error("Fatal error:", err);
+  logger.error({ err }, "Fatal error");
   process.exit(1);
 });

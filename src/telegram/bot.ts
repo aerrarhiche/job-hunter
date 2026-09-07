@@ -3,12 +3,13 @@ import { cfg } from "../config.js";
 import { getTopJobs, recordDecision } from "../db/client.js";
 import { tailorResume, scoreJob } from "../agent/scorer.js";
 import { pool } from "../db/client.js";
+import { logger } from "../logger.js";
 
 let bot: TelegramBot | null = null;
 
 export function startBot(): TelegramBot | null {
   if (!cfg.telegram.botToken) {
-    console.warn("Telegram bot token not set, skipping Telegram integration");
+    logger.warn("Telegram bot token not set, skipping Telegram integration");
     return null;
   }
 
@@ -94,14 +95,14 @@ export function startBot(): TelegramBot | null {
     }
   });
 
-  console.log("Telegram bot started");
+  logger.info("Telegram bot started");
   return bot;
 }
 
 export async function sendDailyBrief(chatId?: string): Promise<void> {
   const targetChat = chatId || cfg.telegram.chatId;
   if (!targetChat || !bot) {
-    console.log("No Telegram chat configured, printing brief to console");
+    logger.info("No Telegram chat configured, printing brief to console");
     await printBriefToConsole();
     return;
   }
@@ -125,13 +126,13 @@ export async function sendDailyBrief(chatId?: string): Promise<void> {
 async function printBriefToConsole(): Promise<void> {
   const jobs = await getTopJobs(5);
   if (jobs.length === 0) {
-    console.log("\nNo new matching jobs.\n");
+    logger.info("\nNo new matching jobs.\n");
     return;
   }
-  console.log(`\n=== Top ${jobs.length} Matches ===\n`);
+  logger.info(`\n=== Top ${jobs.length} Matches ===\n`);
   jobs.forEach((j, i) => {
-    console.log(`${i + 1}. ${j.title} at ${j.company} — ${j.location} — Score: ${j.score}/100`);
-    console.log(`   ${j.score_reason}`);
-    console.log(`   ${j.url}\n`);
+    logger.info(`${i + 1}. ${j.title} at ${j.company} — ${j.location} — Score: ${j.score}/100`);
+    logger.info(`   ${j.score_reason}`);
+    logger.info(`   ${j.url}\n`);
   });
 }

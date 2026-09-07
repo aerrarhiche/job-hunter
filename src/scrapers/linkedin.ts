@@ -1,6 +1,7 @@
 import axios from "axios";
 import type { ScrapedJob } from "./types.js";
 import { withRetry } from "../agent/pipeline.js";
+import { logger } from "../logger.js";
 
 const LI_CONCURRENCY = 3;
 const LI_PER_ROLE_TIMEOUT = 45000; // 45s max per role
@@ -9,7 +10,7 @@ export async function scrapeLinkedIn(runId?: number): Promise<ScrapedJob[]> {
   try {
     const { cfg } = await import("../config.js");
     if (!cfg.apify.token) {
-      console.log("Apify token not set.");
+      logger.info("Apify token not set.");
       return [];
     }
 
@@ -27,7 +28,7 @@ export async function scrapeLinkedIn(runId?: number): Promise<ScrapedJob[]> {
 
     return allJobs;
   } catch (err) {
-    console.warn("LinkedIn scraper:", (err as Error).message);
+    logger.warn({ err }, "LinkedIn scraper failed");
     return [];
   }
 }
@@ -83,7 +84,7 @@ async function searchLinkedInRole(
     }));
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-    console.log(`  LinkedIn: found ${jobs.length} jobs for "${role}" in ${elapsed}s`);
+    logger.info(`  LinkedIn: found ${jobs.length} jobs for "${role}" in ${elapsed}s`);
     await log("completed", `"${role}" → ${jobs.length} jobs (${elapsed}s)`);
     return jobs;
   } catch (e) {
@@ -91,7 +92,7 @@ async function searchLinkedInRole(
     const msg = err.response?.status
       ? `HTTP ${err.response.status}`
       : (err.message ?? "Unknown error");
-    console.warn(`  LinkedIn "${role}": ${msg}`);
+    logger.warn(`  LinkedIn "${role}": ${msg}`);
     await log("failed", `"${role}" failed: ${msg}`);
     return [];
   }

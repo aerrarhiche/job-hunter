@@ -1,5 +1,6 @@
 import { Pool } from "pg";
 import { cfg } from "../config.js";
+import { logger } from "../logger.js";
 
 export const pool = new Pool({
   host: cfg.postgres.host,
@@ -249,7 +250,7 @@ export async function insertJob(
     );
     return true;
   } catch (err) {
-    console.error("Failed to insert job:", err);
+    logger.error({ err }, "Failed to insert job");
     return false;
   }
 }
@@ -407,9 +408,14 @@ export async function recordResumeVersion(
   );
 }
 
-export async function urlExists(url: string): Promise<boolean> {
-  const result = await pool.query("SELECT 1 FROM jobs WHERE url = $1", [url]);
-  return (result.rowCount ?? 0) > 0;
+/**
+ * Batch duplicate check: return the subset of `urls` that already exist in
+ * `jobs`, using a single `WHERE url = ANY(...)` query instead of N round-trips.
+ */
+export async function getExistingUrls(urls: string[]): Promise<Set<string>> {
+  if (urls.length === 0) return new Set();
+  const result = await pool.query("SELECT url FROM jobs WHERE url = ANY($1::text[])", [urls]);
+  return new Set(result.rows.map((row) => row.url as string));
 }
 
 // ---------------------------------------------------------------------------
@@ -425,7 +431,7 @@ export async function seedDefaults(): Promise<void> {
        ('YC Work at a Startup', 'yc', 'https://www.workatastartup.com/jobs'),
        ('LinkedIn Jobs', 'linkedin', 'https://www.linkedin.com/jobs/')`
     );
-    console.log("Seeded default scrapers (YC, LinkedIn)");
+    logger.info("Seeded default scrapers (YC, LinkedIn)");
   }
 
   // Seed default search config from env vars
@@ -440,7 +446,7 @@ export async function seedDefaults(): Promise<void> {
       score_threshold: String(cfg.search.minScore),
       remote_only: String(cfg.search.remoteOnly),
     });
-    console.log("Seeded default search config from env vars");
+    logger.info("Seeded default search config from env vars");
   }
 }
 

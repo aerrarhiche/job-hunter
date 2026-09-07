@@ -23,8 +23,23 @@ import {
 import { generateScoringReport, deepReview, generateCoverLetter } from "../agent/scorer.js";
 import { runSingleScraper } from "../scout/run-scraper.js";
 import type { ScrapedJobMetadata } from "../scrapers/types.js";
+import { logger } from "../logger.js";
 
 const router = Router();
+
+// ---------------------------------------------------------------------------
+// Health check
+// ---------------------------------------------------------------------------
+
+router.get("/healthz", async (_req: Request, res: Response) => {
+  try {
+    await pool.query("SELECT 1");
+    res.json({ status: "ok", uptime: process.uptime() });
+  } catch (err) {
+    logger.error({ err }, "Health check failed");
+    res.status(503).json({ status: "degraded", uptime: process.uptime() });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Stats
@@ -35,7 +50,7 @@ router.get("/api/stats", async (_req: Request, res: Response) => {
     const stats = await getJobStats();
     res.json(stats);
   } catch (err) {
-    console.error("GET /api/stats error:", err);
+    logger.error({ err }, "GET /api/stats error");
     res.status(500).json({ error: "Failed to fetch stats" });
   }
 });
@@ -58,7 +73,7 @@ router.get("/api/jobs", async (req: Request, res: Response) => {
 
     res.json(result);
   } catch (err) {
-    console.error("GET /api/jobs error:", err);
+    logger.error({ err }, "GET /api/jobs error");
     res.status(500).json({ error: "Failed to fetch jobs" });
   }
 });
@@ -85,7 +100,7 @@ router.get("/api/jobs/:id", async (req: Request, res: Response) => {
 
     res.json({ ...job, decisions: decisions.rows });
   } catch (err) {
-    console.error("GET /api/jobs/:id error:", err);
+    logger.error({ err }, "GET /api/jobs/:id error");
     res.status(500).json({ error: "Failed to fetch job" });
   }
 });
@@ -126,7 +141,7 @@ router.get("/api/jobs/:id/report", async (req: Request, res: Response) => {
 
     res.json(report);
   } catch (err) {
-    console.error("GET /api/jobs/:id/report error:", err);
+    logger.error({ err }, "GET /api/jobs/:id/report error");
     res.status(500).json({ error: "Failed to generate scoring report" });
   }
 });
@@ -161,7 +176,7 @@ router.post("/api/jobs/:id/review", async (req: Request, res: Response) => {
 
     res.json(review);
   } catch (err) {
-    console.error("POST /api/jobs/:id/review error:", err);
+    logger.error({ err }, "POST /api/jobs/:id/review error");
     res.status(500).json({ error: "Failed to generate review" });
   }
 });
@@ -195,7 +210,7 @@ router.post("/api/jobs/:id/cover-letter", async (req: Request, res: Response) =>
 
     res.json(letter);
   } catch (err) {
-    console.error("POST /api/jobs/:id/cover-letter error:", err);
+    logger.error({ err }, "POST /api/jobs/:id/cover-letter error");
     res.status(500).json({ error: "Failed to generate cover letter" });
   }
 });
@@ -218,7 +233,7 @@ router.post("/api/jobs/:id/decide", async (req: Request, res: Response) => {
     await recordDecision(id, action, notes);
     res.json({ success: true, action });
   } catch (err) {
-    console.error("POST /api/jobs/:id/decide error:", err);
+    logger.error({ err }, "POST /api/jobs/:id/decide error");
     res.status(500).json({ error: "Failed to record decision" });
   }
 });
@@ -232,7 +247,7 @@ router.get("/api/scrapers", async (_req: Request, res: Response) => {
     const scrapers = await getScrapers();
     res.json(scrapers);
   } catch (err) {
-    console.error("GET /api/scrapers error:", err);
+    logger.error({ err }, "GET /api/scrapers error");
     res.status(500).json({ error: "Failed to fetch scrapers" });
   }
 });
@@ -254,7 +269,7 @@ router.put("/api/scrapers/:id", async (req: Request, res: Response) => {
 
     res.json(updated);
   } catch (err) {
-    console.error("PUT /api/scrapers/:id error:", err);
+    logger.error({ err }, "PUT /api/scrapers/:id error");
     res.status(500).json({ error: "Failed to update scraper" });
   }
 });
@@ -270,7 +285,7 @@ router.post("/api/scrapers", async (req: Request, res: Response) => {
     const scraper = await createScraper(name, url, "custom", selectors || null);
     res.status(201).json(scraper);
   } catch (err) {
-    console.error("POST /api/scrapers error:", err);
+    logger.error({ err }, "POST /api/scrapers error");
     res.status(500).json({ error: "Failed to create scraper" });
   }
 });
@@ -291,7 +306,7 @@ router.delete("/api/scrapers/:id", async (req: Request, res: Response) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error("DELETE /api/scrapers/:id error:", err);
+    logger.error({ err }, "DELETE /api/scrapers/:id error");
     res.status(500).json({ error: "Failed to delete scraper" });
   }
 });
@@ -329,11 +344,11 @@ router.post("/api/scrapers/:id/trigger", async (req: Request, res: Response) => 
         });
       })
       .catch(async (err) => {
-        console.error(`Scraper trigger ${id} failed:`, err);
+        logger.error({ err, scraperId: id }, "Scraper trigger failed");
         await updateScoutRun(runId, { completed_at: new Date().toISOString(), status: "failed" });
       });
   } catch (err) {
-    console.error("POST /api/scrapers/:id/trigger error:", err);
+    logger.error({ err }, "POST /api/scrapers/:id/trigger error");
     res.status(500).json({ error: "Failed to trigger scraper" });
   }
 });
@@ -374,11 +389,11 @@ router.post("/api/scrapers/trigger-all", async (_req: Request, res: Response) =>
         });
       })
       .catch(async (err) => {
-        console.error("Trigger-all failed:", err);
+        logger.error({ err }, "Trigger-all failed");
         await updateScoutRun(runId, { completed_at: new Date().toISOString(), status: "failed" });
       });
   } catch (err) {
-    console.error("POST /api/scrapers/trigger-all error:", err);
+    logger.error({ err }, "POST /api/scrapers/trigger-all error");
     res.status(500).json({ error: "Failed to trigger scrapers" });
   }
 });
@@ -425,7 +440,7 @@ router.get("/api/search-config", async (_req: Request, res: Response) => {
 
     res.json(dash);
   } catch (err) {
-    console.error("GET /api/search-config error:", err);
+    logger.error({ err }, "GET /api/search-config error");
     res.status(500).json({ error: "Failed to fetch search config" });
   }
 });
@@ -484,7 +499,7 @@ router.put("/api/search-config", async (req: Request, res: Response) => {
 
     res.json(dash);
   } catch (err) {
-    console.error("PUT /api/search-config error:", err);
+    logger.error({ err }, "PUT /api/search-config error");
     res.status(500).json({ error: "Failed to update search config" });
   }
 });
@@ -498,7 +513,7 @@ router.get("/api/runs", async (_req: Request, res: Response) => {
     const runs = await getScoutRuns(20);
     res.json(runs);
   } catch (err) {
-    console.error("GET /api/runs error:", err);
+    logger.error({ err }, "GET /api/runs error");
     res.status(500).json({ error: "Failed to fetch scout runs" });
   }
 });
@@ -520,7 +535,7 @@ router.get("/api/audit-logs", async (req: Request, res: Response) => {
     const logs = await getAuditLogs(runId);
     res.json(logs);
   } catch (err) {
-    console.error("GET /api/audit-logs error:", err);
+    logger.error({ err }, "GET /api/audit-logs error");
     res.status(500).json({ error: "Failed to fetch audit logs" });
   }
 });
@@ -534,7 +549,7 @@ router.get("/api/level-up", async (_req: Request, res: Response) => {
     const items = await getLevelUpItems();
     res.json(items);
   } catch (err) {
-    console.error("GET /api/level-up error:", err);
+    logger.error({ err }, "GET /api/level-up error");
     res.status(500).json({ error: "Failed to fetch level-up items" });
   }
 });
@@ -566,7 +581,7 @@ router.post("/api/level-up/generate", async (_req: Request, res: Response) => {
     const items = await getLevelUpItems();
     res.json({ generated, items });
   } catch (err) {
-    console.error("POST /api/level-up/generate error:", err);
+    logger.error({ err }, "POST /api/level-up/generate error");
     res.status(500).json({ error: "Failed to generate level-up items" });
   }
 });
@@ -586,7 +601,7 @@ router.put("/api/level-up/:id", async (req: Request, res: Response) => {
     }
     res.json(item);
   } catch (err) {
-    console.error("PUT /api/level-up/:id error:", err);
+    logger.error({ err }, "PUT /api/level-up/:id error");
     res.status(500).json({ error: "Failed to update item" });
   }
 });
@@ -664,7 +679,7 @@ Respond with ONLY a JSON object:
     const content = response.choices[0]?.message?.content || "{}";
     res.json(JSON.parse(content.trim()));
   } catch (err) {
-    console.error("POST /api/level-up/:id/analyze error:", err);
+    logger.error({ err }, "POST /api/level-up/:id/analyze error");
     res.status(500).json({ error: "Failed to analyze" });
   }
 });
@@ -680,7 +695,7 @@ router.post("/api/level-up/:id/resolve", async (req: Request, res: Response) => 
     await updateLevelUpItem(id, { status: "mastered" });
     res.json({ success: true });
   } catch (err) {
-    console.error("POST /api/level-up/:id/resolve error:", err);
+    logger.error({ err }, "POST /api/level-up/:id/resolve error");
     res.status(500).json({ error: "Failed to resolve" });
   }
 });
@@ -733,7 +748,7 @@ Respond with ONLY the updated resume markdown — no JSON wrapper, no explanatio
     const suggested = response.choices[0]?.message?.content || resume;
     res.json({ suggested });
   } catch (err) {
-    console.error("POST /api/level-up/suggest-resume error:", err);
+    logger.error({ err }, "POST /api/level-up/suggest-resume error");
     res.status(500).json({ error: "Failed to generate resume suggestion" });
   }
 });

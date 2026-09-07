@@ -8,18 +8,19 @@
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import { pool } from "./client.js";
+import { logger } from "../logger.js";
 
 async function migrate(): Promise<void> {
   const schemaPath = process.env.SCHEMA_PATH || resolve(process.cwd(), "src/db/schema.sql");
   const sql = readFileSync(schemaPath, "utf-8");
   await pool.query(sql);
-  console.log(`Schema applied from ${schemaPath}`);
+  logger.info(`Schema applied from ${schemaPath}`);
 }
 
 migrate()
   .then(() => pool.end())
   .catch(async (err) => {
-    console.error("Migration failed:", err);
+    logger.error({ err }, "Migration failed");
     await pool.end();
     process.exit(1);
   });

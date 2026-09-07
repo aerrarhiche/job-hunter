@@ -4,6 +4,7 @@ import { insertAuditLog, updateScraperRun } from "../db/client.js";
 import { scrapeYC } from "../scrapers/yc.js";
 import { scrapeLinkedIn } from "../scrapers/linkedin.js";
 import { scrapeCustom } from "../scrapers/custom.js";
+import { logger } from "../logger.js";
 
 /** Dispatch to the correct scraper implementation for a scraper row. */
 export async function scrapeWithType(scraper: ScraperRow, runId: number): Promise<ScrapedJob[]> {
@@ -33,7 +34,7 @@ export async function runScraper(scraper: ScraperRow, runId: number): Promise<Sc
     return jobs;
   } catch (err) {
     const msg = (err as Error).message;
-    console.warn(`  ${scraper.name}: ${msg}`);
+    logger.warn(`  ${scraper.name}: ${msg}`);
     await updateScraperRun(scraper.id, msg);
     await insertAuditLog(runId, step, "failed", msg);
     return [];
@@ -46,14 +47,14 @@ export async function runSingleScraper(
   runId: number,
   minScore: number
 ): Promise<{ found: number; stored: number; skipped: number }> {
-  console.log(`Triggering scraper: ${scraper.name} (type=${scraper.type})`);
+  logger.info(`Triggering scraper: ${scraper.name} (type=${scraper.type})`);
 
   const step = `scraper:${scraper.name}`;
   await insertAuditLog(runId, step, "running", `Starting ${scraper.name}...`);
 
   try {
     const jobs = await scrapeWithType(scraper, runId);
-    console.log(`  ${scraper.name}: got ${jobs.length} jobs`);
+    logger.info(`  ${scraper.name}: got ${jobs.length} jobs`);
 
     const { scoreAndStoreJobs } = await import("../agent/pipeline.js");
     const result = await scoreAndStoreJobs(jobs, {
@@ -74,7 +75,7 @@ export async function runSingleScraper(
     const msg = (err as Error).message;
     await updateScraperRun(scraper.id, msg);
     await insertAuditLog(runId, step, "failed", msg);
-    console.error(`  ${scraper.name}: failed – ${msg}`);
+    logger.error(`  ${scraper.name}: failed – ${msg}`);
     return { found: 0, stored: 0, skipped: 0 };
   }
 }

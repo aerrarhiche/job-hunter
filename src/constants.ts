@@ -8,6 +8,7 @@
 export const SALARY_FLOOR_USD = 120000;
 export const DEFAULT_MIN_SCORE = 70;
 export const DEFAULT_API_PORT = 3000;
+export const GRACEFUL_SHUTDOWN_TIMEOUT_MS = 10_000;
 
 export const REMOTE_PENALTY = 30;
 export const SALARY_PENALTY = 20;
