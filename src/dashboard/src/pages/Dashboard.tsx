@@ -4,6 +4,8 @@ import {
   fetchScrapers,
   fetchRuns,
   fetchJobs,
+  fetchFunnel,
+  fetchPreferences,
   triggerAllScrapers,
   triggerScraper,
   updateScraper,
@@ -24,6 +26,8 @@ import {
   Zap,
   Clock,
   Radio,
+  BarChart3,
+  Target,
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -56,6 +60,18 @@ export default function Dashboard() {
     queryFn: () => fetchJobs({ limit: 5, page: 1 }),
   });
   const recentJobs = Array.isArray(recentJobsData) ? [] : (recentJobsData as any)?.jobs || [];
+
+  const { data: funnel, isLoading: funnelLoading } = useQuery({
+    queryKey: ['funnel'],
+    queryFn: fetchFunnel,
+    refetchInterval: 30000,
+  });
+
+  const { data: preferences, isLoading: prefsLoading } = useQuery({
+    queryKey: ['preferences'],
+    queryFn: fetchPreferences,
+    refetchInterval: 30000,
+  });
 
   const triggerAllMutation = useMutation({
     mutationFn: triggerAllScrapers,
@@ -248,6 +264,89 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Funnel */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <BarChart3 className="h-4 w-4 text-cyan-600 dark:text-cyan-400" />
+          <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Funnel</h3>
+        </div>
+        {funnelLoading ? (
+          <Skeleton className="h-24 rounded-xl" />
+        ) : (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              {[
+                { label: 'Scraped', value: funnel?.scraped ?? 0 },
+                { label: 'Scored', value: funnel?.scored ?? 0 },
+                { label: 'Applied', value: funnel?.applied ?? 0 },
+                { label: 'Interviewing', value: funnel?.interviewing ?? 0 },
+                { label: 'Offered', value: funnel?.offered ?? 0 },
+              ].map((stage) => (
+                <div
+                  key={stage.label}
+                  className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50 p-4"
+                >
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{stage.label}</p>
+                  <p className="text-2xl font-bold text-slate-800 dark:text-slate-100 mt-1">
+                    {stage.value}
+                  </p>
+                </div>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-4 text-xs text-slate-500 dark:text-slate-400">
+              <span>
+                Scored → Applied: {Math.round((funnel?.conversionRates.scoredToApplied ?? 0) * 100)}%
+              </span>
+              <span>
+                Applied → Interviewing:{' '}
+                {Math.round((funnel?.conversionRates.appliedToInterviewing ?? 0) * 100)}%
+              </span>
+              <span>
+                Interviewing → Offered:{' '}
+                {Math.round((funnel?.conversionRates.interviewingToOffered ?? 0) * 100)}%
+              </span>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Learned Preferences */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Target className="h-4 w-4 text-cyan-600 dark:text-cyan-400" />
+          <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+            Learned Preferences
+          </h3>
+        </div>
+        {prefsLoading ? (
+          <Skeleton className="h-24 rounded-xl" />
+        ) : preferences && preferences.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {preferences.map((pref) => (
+              <div
+                key={pref.id}
+                className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/50 p-4"
+              >
+                <p className="text-xs text-slate-500 dark:text-slate-400 capitalize">
+                  {pref.key.replace(/_/g, ' ')}
+                </p>
+                <p className="text-sm font-semibold text-cyan-600 dark:text-cyan-400 mt-1">
+                  {pref.value}
+                </p>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+                  confidence {(pref.confidence ?? 0).toFixed(2)} · {pref.learned_from ?? 'unknown'}
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            No learned preferences yet. Mark jobs as applied, interviewing, or offered to teach the
+            agent.
+          </p>
+        )}
       </div>
     </div>
   );

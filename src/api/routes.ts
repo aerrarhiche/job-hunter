@@ -4,7 +4,8 @@ import {
   getJobStats,
   getJobs,
   getJobById,
-  recordDecision,
+  getPreferences,
+  getFunnel,
   getScrapers,
   getScraper,
   createScraper,
@@ -21,6 +22,7 @@ import {
   updateLevelUpItem,
 } from "../db/client.js";
 import { generateScoringReport, deepReview, generateCoverLetter } from "../agent/scorer.js";
+import { applyDecisionAndLearn } from "../agent/learner.js";
 import { runSingleScraper } from "../scout/run-scraper.js";
 import type { ScrapedJobMetadata } from "../scrapers/types.js";
 import { logger } from "../logger.js";
@@ -52,6 +54,34 @@ router.get("/api/stats", async (_req: Request, res: Response) => {
   } catch (err) {
     logger.error({ err }, "GET /api/stats error");
     res.status(500).json({ error: "Failed to fetch stats" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Learned preferences
+// ---------------------------------------------------------------------------
+
+router.get("/api/preferences", async (_req: Request, res: Response) => {
+  try {
+    const preferences = await getPreferences();
+    res.json(preferences);
+  } catch (err) {
+    logger.error({ err }, "GET /api/preferences error");
+    res.status(500).json({ error: "Failed to fetch preferences" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Results funnel
+// ---------------------------------------------------------------------------
+
+router.get("/api/funnel", async (_req: Request, res: Response) => {
+  try {
+    const funnel = await getFunnel();
+    res.json(funnel);
+  } catch (err) {
+    logger.error({ err }, "GET /api/funnel error");
+    res.status(500).json({ error: "Failed to fetch funnel" });
   }
 });
 
@@ -230,7 +260,7 @@ router.post("/api/jobs/:id/decide", async (req: Request, res: Response) => {
       return;
     }
 
-    await recordDecision(id, action, notes);
+    await applyDecisionAndLearn(id, action, notes);
     res.json({ success: true, action });
   } catch (err) {
     logger.error({ err }, "POST /api/jobs/:id/decide error");

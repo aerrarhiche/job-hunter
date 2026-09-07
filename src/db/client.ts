@@ -408,6 +408,129 @@ export async function recordResumeVersion(
   );
 }
 
+// ---------------------------------------------------------------------------
+// Preference learning
+// ---------------------------------------------------------------------------
+
+/** A single learned preference produced by the decision learner. */
+export interface PreferenceSignal {
+  key: string;
+  value: string;
+  confidence: number;
+  learnedFrom: string;
+}
+
+export interface PreferenceRow {
+  id: number;
+  key: string;
+  value: string;
+  learned_from: string | null;
+  confidence: number | null;
+  created_at: string;
+}
+
+export async function upsertPreference(signal: PreferenceSignal): Promise<void> {
+  await pool.query(
+    `INSERT INTO preferences (key, value, learned_from, confidence)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (key)
+     DO UPDATE SET
+       value = EXCLUDED.value,
+       learned_from = EXCLUDED.learned_from,
+       confidence = EXCLUDED.confidence
+     WHERE EXCLUDED.confidence > preferences.confidence`,
+    [signal.key, signal.value, signal.learnedFrom, signal.confidence]
+  );
+}
+
+export async function getPreferences(): Promise<PreferenceRow[]> {
+  const result = await pool.query(
+    "SELECT * FROM preferences ORDER BY confidence DESC NULLS LAST, key ASC"
+  );
+  return result.rows;
+}
+
+// ---------------------------------------------------------------------------
+// Results funnel
+// ---------------------------------------------------------------------------
+
+export interface FunnelResult {
+  scraped: number;
+  scored: number;
+  applied: number;
+  interviewing: number;
+  offered: number;
+  conversionRates: {
+    scoredToApplied: number;
+    appliedToInterviewing: number;
+    interviewingToOffered: number;
+  };
+  bySource: Array<{
+    source: string;
+    scraped: number;
+    applied: number;
+    interviewing: number;
+    offered: number;
+  }>;
+}
+
+function conversionRate(denominator: number, numerator: number): number {
+  if (denominator === 0) return 0;
+  return Math.round((numerator / denominator) * 1000) / 1000;
+}
+
+export async function getFunnel(): Promise<FunnelResult> {
+  const [stageResult, sourceResult] = await Promise.all([
+    pool.query(
+      `SELECT
+         COUNT(*) AS scraped,
+         COUNT(score) AS scored,
+         COUNT(*) FILTER (WHERE status = 'applied') AS applied,
+         COUNT(*) FILTER (WHERE status = 'interviewing') AS interviewing,
+         COUNT(*) FILTER (WHERE status = 'offered') AS offered
+       FROM jobs`
+    ),
+    pool.query(
+      `SELECT
+         source,
+         COUNT(*) AS scraped,
+         COUNT(*) FILTER (WHERE status = 'applied') AS applied,
+         COUNT(*) FILTER (WHERE status = 'interviewing') AS interviewing,
+         COUNT(*) FILTER (WHERE status = 'offered') AS offered
+       FROM jobs
+       GROUP BY source
+       ORDER BY scraped DESC`
+    ),
+  ]);
+
+  const s = stageResult.rows[0];
+  const scraped = parseInt(s.scraped, 10);
+  const scored = parseInt(s.scored, 10);
+  const applied = parseInt(s.applied, 10);
+  const interviewing = parseInt(s.interviewing, 10);
+  const offered = parseInt(s.offered, 10);
+
+  return {
+    scraped,
+    scored,
+    applied,
+    interviewing,
+    offered,
+    conversionRates: {
+      scoredToApplied: conversionRate(scored, applied),
+      appliedToInterviewing: conversionRate(applied, interviewing),
+      interviewingToOffered: conversionRate(interviewing, offered),
+    },
+    bySource: sourceResult.rows.map((row) => ({
+      source: row.source,
+      scraped: parseInt(row.scraped, 10),
+      applied: parseInt(row.applied, 10),
+      interviewing: parseInt(row.interviewing, 10),
+      offered: parseInt(row.offered, 10),
+    })),
+  };
+}
+
 /**
  * Batch duplicate check: return the subset of `urls` that already exist in
  * `jobs`, using a single `WHERE url = ANY(...)` query instead of N round-trips.

@@ -30,6 +30,49 @@ export async function fetchStats(): Promise<Stats> {
   };
 }
 
+// ─── Learned preferences ───
+export interface Preference {
+  id: number;
+  key: string;
+  value: string;
+  learned_from: string | null;
+  confidence: number | null;
+  created_at: string;
+}
+
+export async function fetchPreferences(): Promise<Preference[]> {
+  const { data } = await api.get('/preferences');
+  return data;
+}
+
+// ─── Results funnel ───
+export interface FunnelBySource {
+  source: string;
+  scraped: number;
+  applied: number;
+  interviewing: number;
+  offered: number;
+}
+
+export interface Funnel {
+  scraped: number;
+  scored: number;
+  applied: number;
+  interviewing: number;
+  offered: number;
+  conversionRates: {
+    scoredToApplied: number;
+    appliedToInterviewing: number;
+    interviewingToOffered: number;
+  };
+  bySource: FunnelBySource[];
+}
+
+export async function fetchFunnel(): Promise<Funnel> {
+  const { data } = await api.get('/funnel');
+  return data;
+}
+
 // ─── Jobs ───
 export interface Job {
   id: string;
