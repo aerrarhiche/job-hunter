@@ -43,7 +43,9 @@ async function searchLinkedInRole(
     try {
       const { insertAuditLog } = await import("../db/client.js");
       await insertAuditLog(runId, step, status, msg);
-    } catch { /* non-critical */ }
+    } catch {
+      /* non-critical */
+    }
   };
 
   await log("running", `Searching "${role}"...`);
@@ -71,7 +73,7 @@ async function searchLinkedInRole(
       ),
     ]);
 
-    const jobs = (Array.isArray(data) ? data : []).map((j: any) => ({
+    const jobs = (Array.isArray(data) ? data : []).map((j: Record<string, string | undefined>) => ({
       title: j.title || j.jobTitle || "",
       company: j.company || j.companyName || "",
       location: j.location || "",
@@ -84,8 +86,11 @@ async function searchLinkedInRole(
     console.log(`  LinkedIn: found ${jobs.length} jobs for "${role}" in ${elapsed}s`);
     await log("completed", `"${role}" → ${jobs.length} jobs (${elapsed}s)`);
     return jobs;
-  } catch (e: any) {
-    const msg = e.response?.status ? `HTTP ${e.response.status}` : (e as Error).message;
+  } catch (e) {
+    const err = e as { response?: { status?: number }; message?: string };
+    const msg = err.response?.status
+      ? `HTTP ${err.response.status}`
+      : (err.message ?? "Unknown error");
     console.warn(`  LinkedIn "${role}": ${msg}`);
     await log("failed", `"${role}" failed: ${msg}`);
     return [];

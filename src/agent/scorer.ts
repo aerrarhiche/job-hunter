@@ -8,6 +8,19 @@ const client = new OpenAI({
   baseURL: cfg.deepseek.baseUrl,
 });
 
+interface MetadataContext {
+  ycBatch?: string;
+  companySize?: string;
+  companyDescription?: string;
+  roleDescription?: string;
+  interviewProcess?: string;
+}
+
+interface ScoringReportContext {
+  overall_score?: number;
+  summary?: string;
+}
+
 // ── Job input type used by both scoring functions ──────────────────
 
 export interface JobForScoring {
@@ -45,9 +58,7 @@ function buildJobBlock(job: JobForScoring): string {
   if (m) {
     // Equity
     if (m.equityMin != null || m.equityMax != null) {
-      parts.push(
-        `Equity: ${m.equityMin ?? "?"}% - ${m.equityMax ?? "?"}%`
-      );
+      parts.push(`Equity: ${m.equityMin ?? "?"}% - ${m.equityMax ?? "?"}%`);
     }
 
     // YC batch
@@ -93,9 +104,7 @@ function buildJobBlock(job: JobForScoring): string {
 
 // ── Pipeline scoring (quick, used during cron runs) ────────────────
 
-export async function scoreJob(
-  job: JobForScoring
-): Promise<{ score: number; reason: string }> {
+export async function scoreJob(job: JobForScoring): Promise<{ score: number; reason: string }> {
   const resume = loadResume();
   if (!resume) return { score: 50, reason: "No resume loaded" };
 
@@ -157,9 +166,7 @@ export interface ScoringReport {
   company_size?: string;
 }
 
-export async function generateScoringReport(
-  job: JobForScoring
-): Promise<ScoringReport> {
+export async function generateScoringReport(job: JobForScoring): Promise<ScoringReport> {
   const resume = loadResume();
   const soul = loadSoul();
 
@@ -325,7 +332,7 @@ export async function deepReview(job: {
   contextParts.push(`\nDESCRIPTION:\n${job.description}`);
 
   if (job.metadata) {
-    const m = job.metadata as any;
+    const m = job.metadata as unknown as MetadataContext;
     if (m.ycBatch) contextParts.push(`YC Batch: ${m.ycBatch}`);
     if (m.companySize) contextParts.push(`Company Size: ${m.companySize}`);
     if (m.companyDescription) contextParts.push(`\nABOUT COMPANY:\n${m.companyDescription}`);
@@ -334,7 +341,7 @@ export async function deepReview(job: {
   }
 
   if (job.scoringReport) {
-    const r = job.scoringReport as any;
+    const r = job.scoringReport as unknown as ScoringReportContext;
     contextParts.push(`\nAI SCORING REPORT:`);
     contextParts.push(`Overall Score: ${r.overall_score}/100`);
     contextParts.push(`Summary: ${r.summary}`);
@@ -420,13 +427,14 @@ export async function generateCoverLetter(job: {
   // Build rich context for the letter
   const contextParts: string[] = [];
   if (job.metadata) {
-    const m = job.metadata as any;
+    const m = job.metadata as unknown as MetadataContext;
     if (m.companyDescription) contextParts.push(`About ${job.company}: ${m.companyDescription}`);
     if (m.roleDescription) contextParts.push(`About the role: ${m.roleDescription}`);
     if (m.companySize) contextParts.push(`Company size: ${m.companySize}`);
     if (m.ycBatch) contextParts.push(`YC Batch: ${m.ycBatch}`);
   }
-  const extraContext = contextParts.length > 0 ? "\n\nADDITIONAL COMPANY CONTEXT:\n" + contextParts.join("\n") : "";
+  const extraContext =
+    contextParts.length > 0 ? "\n\nADDITIONAL COMPANY CONTEXT:\n" + contextParts.join("\n") : "";
 
   const prompt = `You are a professional cover letter writer. Write a concise, honest cover letter for this job application. The tone should be professional and relaxed — confident but not over-eager.
 

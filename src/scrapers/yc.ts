@@ -14,7 +14,7 @@
  * - 3 concurrent role searches per flow
  * - Early scroll stop when no new links appear
  */
-import puppeteer, { Browser } from "puppeteer";
+import puppeteer, { Browser, type Page, type HTTPRequest } from "puppeteer";
 import type { ScrapedJob, ScrapedJobMetadata } from "./types.js";
 import { DEBUG_JOB_LIMIT } from "../agent/pipeline.js";
 
@@ -26,9 +26,9 @@ const ROLE_CONCURRENCY = 3;
 
 // ── Resource blocking ──────────────────────────────────────────────
 
-async function blockResources(page: any) {
+async function blockResources(page: Page) {
   await page.setRequestInterception(true);
-  page.on("request", (req: any) => {
+  page.on("request", (req: HTTPRequest) => {
     const t = req.resourceType();
     if (t === "image" || t === "font" || t === "media") {
       req.abort();
@@ -122,10 +122,8 @@ export async function scrapeYC(runId?: number): Promise<ScrapedJob[]> {
       scrapeCompaniesFlow(browser, cfg.search.roleTitles, runId),
       scrapeJobsFlow(browser, cfg.search.roleTitles, runId),
     ]);
-    const companiesUrls: TaggedUrl[] =
-      results[0].status === "fulfilled" ? results[0].value : [];
-    const jobsUrls: TaggedUrl[] =
-      results[1].status === "fulfilled" ? results[1].value : [];
+    const companiesUrls: TaggedUrl[] = results[0].status === "fulfilled" ? results[0].value : [];
+    const jobsUrls: TaggedUrl[] = results[1].status === "fulfilled" ? results[1].value : [];
     if (results[0].status === "rejected")
       console.warn(`  YC /companies flow failed: ${(results[0].reason as Error).message}`);
     if (results[1].status === "rejected")
@@ -143,17 +141,21 @@ export async function scrapeYC(runId?: number): Promise<ScrapedJob[]> {
     console.log(
       `  YC: ${companiesUrls.length}/c + ${jobsUrls.length}/j = ${allTagged.length} unique`
     );
-    await audit(runId, "yc:merge", "completed",
+    await audit(
+      runId,
+      "yc:merge",
+      "completed",
       `Merged: ${companiesUrls.length} from Flow A + ${jobsUrls.length} from Flow B = ${allTagged.length} unique`
     );
     if (allTagged.length === 0) return [];
 
     // ── Detail pages (concurrent worker pool) ──────────────────────
     const limit =
-      DEBUG_JOB_LIMIT > 0
-        ? Math.min(allTagged.length, DEBUG_JOB_LIMIT)
-        : allTagged.length;
-    await audit(runId, "yc:details", "running",
+      DEBUG_JOB_LIMIT > 0 ? Math.min(allTagged.length, DEBUG_JOB_LIMIT) : allTagged.length;
+    await audit(
+      runId,
+      "yc:details",
+      "running",
       `Visiting ${limit} pages (${DETAIL_CONCURRENCY} workers)...`
     );
     const start = Date.now();
@@ -202,11 +204,9 @@ async function extractDetails(
           const detail = await page.evaluate(
             (cd: string, flow: string) => {
               // ── Title & Company ──────────────────────────────────
-              const h1Text =
-                document.querySelector("h1")?.textContent?.trim() || "";
+              const h1Text = document.querySelector("h1")?.textContent?.trim() || "";
               const title = h1Text.split(" at ")[0]?.trim() || h1Text;
-              const company =
-                document.querySelector("h1 a")?.textContent?.trim() || "";
+              const company = document.querySelector("h1 a")?.textContent?.trim() || "";
 
               // YC batch (e.g. "(S25)" in the title)
               const batchMatch = h1Text.match(/\(([SW]\d{2})\)/);
@@ -225,8 +225,7 @@ async function extractDetails(
               );
               if (sm) {
                 const p = (s: string) =>
-                  parseFloat(s.replace(/[,]/g, "")) *
-                  (/[KMB]/i.test(salaryText) ? 1000 : 1);
+                  parseFloat(s.replace(/[,]/g, "")) * (/[KMB]/i.test(salaryText) ? 1000 : 1);
                 sMin = p(sm[1]);
                 sMax = p(sm[2]);
               }
@@ -234,29 +233,21 @@ async function extractDetails(
               // Equity
               let eMin: number | null = null;
               let eMax: number | null = null;
-              const eqMatch = salaryText.match(
-                /([\d.]+)%\s*[-–—to]+\s*([\d.]+)%/
-              );
+              const eqMatch = salaryText.match(/([\d.]+)%\s*[-–—to]+\s*([\d.]+)%/);
               if (eqMatch) {
                 eMin = parseFloat(eqMatch[1]);
                 eMax = parseFloat(eqMatch[2]);
               }
 
               // ── Location ─────────────────────────────────────────
-              const lc = document
-                .querySelector(".fa-location-dot")
-                ?.closest("span");
+              const lc = document.querySelector(".fa-location-dot")?.closest("span");
               const ls = lc?.querySelectorAll("span");
               const location =
-                (ls && ls.length > 0
-                  ? ls[ls.length - 1]?.textContent?.trim()
-                  : "") || "";
+                (ls && ls.length > 0 ? ls[ls.length - 1]?.textContent?.trim() : "") || "";
 
               // ── Tags (employment type, visa, experience) ─────────
               const tags: string[] = [];
-              const tagSpans = document.querySelectorAll(
-                "span.inline-flex.items-center.gap-1\\.5"
-              );
+              const tagSpans = document.querySelectorAll("span.inline-flex.items-center.gap-1\\.5");
               tagSpans.forEach((el) => {
                 const t = el.textContent?.trim();
                 if (t && t.length < 50) tags.push(t);
@@ -265,9 +256,7 @@ async function extractDetails(
               const employmentType = tags.find((t) =>
                 /full.time|part.time|contract|intern/i.test(t)
               );
-              const visaSponsorship = tags.some((t) =>
-                /sponsor/i.test(t)
-              );
+              const visaSponsorship = tags.some((t) => /sponsor/i.test(t));
 
               // ── Hard filter: US citizen/visa only ──────────────
               const usOnly = tags.some((t) =>
@@ -289,10 +278,11 @@ async function extractDetails(
               for (let i = 0; i < allProse.length; i++) {
                 const text = allProse[i].textContent?.trim() || "";
                 // Find the nearest preceding heading
-                const prevHeading = allProse[i]
-                  .closest("div")
-                  ?.previousElementSibling?.querySelector("span")
-                  ?.textContent?.trim() || "";
+                const prevHeading =
+                  allProse[i]
+                    .closest("div")
+                    ?.previousElementSibling?.querySelector("span")
+                    ?.textContent?.trim() || "";
                 if (
                   prevHeading.toLowerCase().includes("about") &&
                   !prevHeading.toLowerCase().includes("role")
@@ -300,9 +290,7 @@ async function extractDetails(
                   companyDescription = text;
                 } else if (prevHeading.toLowerCase().includes("role")) {
                   roleDescription = text;
-                } else if (
-                  prevHeading.toLowerCase().includes("interview")
-                ) {
+                } else if (prevHeading.toLowerCase().includes("interview")) {
                   interviewProcess = text;
                 }
               }
@@ -319,11 +307,11 @@ async function extractDetails(
               }
 
               // Use role description as primary, fall back to first prose
-              const description =
-                (roleDescription ||
-                  allProse[0]?.textContent?.trim() ||
-                  "")
-                  .substring(0, 4000);
+              const description = (
+                roleDescription ||
+                allProse[0]?.textContent?.trim() ||
+                ""
+              ).substring(0, 4000);
 
               // ── Posted date ──────────────────────────────────────
               const dateEl = document.querySelector("time[datetime]");
@@ -331,9 +319,7 @@ async function extractDetails(
                 ? dateEl.getAttribute("datetime")?.split("T")[0] || null
                 : null;
               if (!posted) {
-                const dm = (document.body?.innerText || "").match(
-                  /(\d+)\s*days?\s*ago/i
-                );
+                const dm = (document.body?.innerText || "").match(/(\d+)\s*days?\s*ago/i);
                 if (dm) {
                   const d = new Date();
                   d.setDate(d.getDate() - parseInt(dm[1], 10));
@@ -393,8 +379,7 @@ async function extractDetails(
         } catch (err) {
           console.warn(`  YC detail failed: ${(err as Error).message}`);
         }
-        if (queue.length > 0)
-          await new Promise((r) => setTimeout(r, DETAIL_DELAY_MS));
+        if (queue.length > 0) await new Promise((r) => setTimeout(r, DETAIL_DELAY_MS));
       }
     } finally {
       await page.close();
@@ -458,7 +443,8 @@ async function searchCompaniesRole(
       "&layout=list-compact" +
       "&remote=any&sortBy=keyword&tab=any" +
       "&usVisaNotRequired=true" +
-      "&query=" + encodeURIComponent(role);
+      "&query=" +
+      encodeURIComponent(role);
 
     await page.goto(url, { waitUntil: "networkidle2", timeout: 20000 });
 
@@ -513,12 +499,7 @@ async function scrapeJobsFlow(
 
   for (const role of roles) {
     console.log(`  YC /jobs: searching "${role}"...`);
-    await audit(
-      runId,
-      `yc:search:B:${role}`,
-      "running",
-      `[Flow B] searching "${role}"...`
-    );
+    await audit(runId, `yc:search:B:${role}`, "running", `[Flow B] searching "${role}"...`);
     try {
       const ta = await page.$("textarea");
       if (!ta) {
@@ -536,9 +517,7 @@ async function scrapeJobsFlow(
       if (btn) await btn.click();
 
       const appeared = await Promise.race([
-        page
-          .waitForSelector('a[href*="/jobs/"]', { timeout: 12000 })
-          .then(() => true),
+        page.waitForSelector('a[href*="/jobs/"]', { timeout: 12000 }).then(() => true),
         new Promise<boolean>((r) => setTimeout(() => r(false), 12000)),
       ]);
       if (!appeared) {
@@ -550,9 +529,7 @@ async function scrapeJobsFlow(
 
       let prevCount = 0;
       for (let i = 0; i < SCROLL_COUNT; i++) {
-        await page.evaluate(() =>
-          window.scrollTo(0, document.body.scrollHeight)
-        );
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
         await new Promise((r) => setTimeout(r, SCROLL_WAIT_MS));
         const current = await page.evaluate(
           () => document.querySelectorAll('a[href*="/jobs/"]').length

@@ -19,6 +19,9 @@ yarn-error.log*
 # OS / editor
 .DS_Store
 
+# Internal planning docs (local only, not published)
+IMPLEMENTATION_PLAN.md
+
 # Personal job-search inputs (never publish)
 resume/master.md
 resume/soul.md

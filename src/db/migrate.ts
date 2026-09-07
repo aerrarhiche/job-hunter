@@ -10,8 +10,7 @@ import { resolve } from "path";
 import { pool } from "./client.js";
 
 async function migrate(): Promise<void> {
-  const schemaPath =
-    process.env.SCHEMA_PATH || resolve(process.cwd(), "src/db/schema.sql");
+  const schemaPath = process.env.SCHEMA_PATH || resolve(process.cwd(), "src/db/schema.sql");
   const sql = readFileSync(schemaPath, "utf-8");
   await pool.query(sql);
   console.log(`Schema applied from ${schemaPath}`);

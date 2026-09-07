@@ -135,15 +135,12 @@ export async function deleteScraper(id: number): Promise<boolean> {
 
 export async function updateScraperRun(id: number, error?: string): Promise<void> {
   if (error) {
-    await pool.query(
-      "UPDATE scrapers SET last_run = NOW(), last_error = $1 WHERE id = $2",
-      [error, id]
-    );
+    await pool.query("UPDATE scrapers SET last_run = NOW(), last_error = $1 WHERE id = $2", [
+      error,
+      id,
+    ]);
   } else {
-    await pool.query(
-      "UPDATE scrapers SET last_run = NOW(), last_error = NULL WHERE id = $1",
-      [id]
-    );
+    await pool.query("UPDATE scrapers SET last_run = NOW(), last_error = NULL WHERE id = $1", [id]);
   }
 }
 
@@ -186,17 +183,13 @@ export async function updateScoutRun(
   if (setClauses.length === 0) return;
 
   values.push(id);
-  await pool.query(
-    `UPDATE scout_runs SET ${setClauses.join(", ")} WHERE id = $${idx}`,
-    values
-  );
+  await pool.query(`UPDATE scout_runs SET ${setClauses.join(", ")} WHERE id = $${idx}`, values);
 }
 
 export async function getScoutRuns(limit = 20): Promise<ScoutRunRow[]> {
-  const result = await pool.query(
-    "SELECT * FROM scout_runs ORDER BY started_at DESC LIMIT $1",
-    [limit]
-  );
+  const result = await pool.query("SELECT * FROM scout_runs ORDER BY started_at DESC LIMIT $1", [
+    limit,
+  ]);
   return result.rows;
 }
 
@@ -287,7 +280,9 @@ export interface JobFilters {
   offset?: number;
 }
 
-export async function getJobs(filters: JobFilters = {}): Promise<{ jobs: JobRow[]; total: number }> {
+export async function getJobs(
+  filters: JobFilters = {}
+): Promise<{ jobs: JobRow[]; total: number }> {
   const conditions: string[] = [];
   const values: unknown[] = [];
   let idx = 1;
@@ -309,10 +304,7 @@ export async function getJobs(filters: JobFilters = {}): Promise<{ jobs: JobRow[
   const limit = filters.limit ?? 20;
   const offset = filters.offset ?? 0;
 
-  const countResult = await pool.query(
-    `SELECT COUNT(*) as total FROM jobs j ${where}`,
-    values
-  );
+  const countResult = await pool.query(`SELECT COUNT(*) as total FROM jobs j ${where}`, values);
   const total = parseInt(countResult.rows[0].total, 10);
 
   const dataResult = await pool.query(
@@ -322,7 +314,7 @@ export async function getJobs(filters: JobFilters = {}): Promise<{ jobs: JobRow[
      LEFT JOIN decisions d ON d.job_id = j.id
      ${where}
      ORDER BY j.score DESC NULLS LAST, j.created_at DESC
-     LIMIT $${idx++} OFFSET $${idx++}`,
+     LIMIT $${idx} OFFSET $${idx + 1}`,
     [...values, limit, offset]
   );
 
@@ -347,14 +339,23 @@ export async function getJobStats(): Promise<JobStats> {
   const [countResult, scoreResult, statusResult, scraperResult] = await Promise.all([
     pool.query("SELECT COUNT(*) as total FROM jobs"),
     pool.query("SELECT ROUND(AVG(score), 1) as avg_score FROM jobs WHERE score IS NOT NULL"),
-    pool.query("SELECT COALESCE(status, 'new') as status, COUNT(*) as count FROM jobs GROUP BY status"),
+    pool.query(
+      "SELECT COALESCE(status, 'new') as status, COUNT(*) as count FROM jobs GROUP BY status"
+    ),
     pool.query("SELECT type, last_run, last_error FROM scrapers WHERE active = true"),
   ]);
 
   const total = parseInt(countResult.rows[0].total, 10);
   const avgScore = parseFloat(scoreResult.rows[0]?.avg_score ?? "0");
 
-  const statusCounts: Record<string, number> = { new: 0, applied: 0, skipped: 0, not_a_fit: 0, interviewing: 0, offered: 0 };
+  const statusCounts: Record<string, number> = {
+    new: 0,
+    applied: 0,
+    skipped: 0,
+    not_a_fit: 0,
+    interviewing: 0,
+    offered: 0,
+  };
   for (const row of statusResult.rows) {
     statusCounts[row.status] = parseInt(row.count, 10);
   }
@@ -382,15 +383,12 @@ export async function getJobStats(): Promise<JobStats> {
   };
 }
 
-export async function recordDecision(
-  jobId: number,
-  action: string,
-  notes?: string
-): Promise<void> {
-  await pool.query(
-    "INSERT INTO decisions (job_id, action, notes) VALUES ($1, $2, $3)",
-    [jobId, action, notes || null]
-  );
+export async function recordDecision(jobId: number, action: string, notes?: string): Promise<void> {
+  await pool.query("INSERT INTO decisions (job_id, action, notes) VALUES ($1, $2, $3)", [
+    jobId,
+    action,
+    notes || null,
+  ]);
 
   // Also update job status for dashboard tracking
   if (["applied", "skipped", "not_a_fit", "interviewing", "offered"].includes(action)) {
@@ -466,15 +464,17 @@ export async function insertAuditLog(
   );
 }
 
-export async function getAuditLogs(scoutRunId: number): Promise<Array<{
-  id: number;
-  scout_run_id: number;
-  step: string;
-  status: string;
-  message: string | null;
-  details: Record<string, unknown> | null;
-  created_at: string;
-}>> {
+export async function getAuditLogs(scoutRunId: number): Promise<
+  Array<{
+    id: number;
+    scout_run_id: number;
+    step: string;
+    status: string;
+    message: string | null;
+    details: Record<string, unknown> | null;
+    created_at: string;
+  }>
+> {
   const result = await pool.query(
     "SELECT * FROM audit_logs WHERE scout_run_id = $1 ORDER BY created_at ASC",
     [scoutRunId]
@@ -498,7 +498,9 @@ export interface LevelUpItem {
 }
 
 export async function getLevelUpItems(): Promise<LevelUpItem[]> {
-  const result = await pool.query("SELECT * FROM level_up_items ORDER BY status = 'to_learn' DESC, id ASC");
+  const result = await pool.query(
+    "SELECT * FROM level_up_items ORDER BY status = 'to_learn' DESC, id ASC"
+  );
   return result.rows;
 }
 

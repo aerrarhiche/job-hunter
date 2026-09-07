@@ -65,7 +65,9 @@ export async function researchCompany(
   if (allSnippets.length === 0) {
     globalFailures++;
     if (globalFailures >= GLOBAL_CIRCUIT_BREAKER) {
-      console.warn(`  [research] DDG unreachable for ${GLOBAL_CIRCUIT_BREAKER} companies — disabling research for rest of run`);
+      console.warn(
+        `  [research] DDG unreachable for ${GLOBAL_CIRCUIT_BREAKER} companies — disabling research for rest of run`
+      );
     }
   }
 
@@ -118,9 +120,7 @@ export function formatResearchForPrompt(research: CompanyResearch): string {
     return `No web search results found for "${research.company}".`;
   }
 
-  const lines = research.snippets.map(
-    (s, i) => `  [${i + 1}] ${s}`
-  );
+  const lines = research.snippets.map((s, i) => `  [${i + 1}] ${s}`);
 
   return `Web search results for "${research.company}":\n${lines.join("\n")}`;
 }

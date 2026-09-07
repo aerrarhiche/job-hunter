@@ -25,7 +25,7 @@ import { scrapeYC } from "../scrapers/yc.js";
 import { scrapeLinkedIn } from "../scrapers/linkedin.js";
 import { scrapeCustom } from "../scrapers/custom.js";
 import { generateScoringReport, deepReview, generateCoverLetter } from "../agent/scorer.js";
-import { cfg } from "../config.js";
+import type { ScrapedJobMetadata } from "../scrapers/types.js";
 
 const router = Router();
 
@@ -49,13 +49,7 @@ router.get("/api/stats", async (_req: Request, res: Response) => {
 
 router.get("/api/jobs", async (req: Request, res: Response) => {
   try {
-    const {
-      source,
-      minScore,
-      status,
-      limit,
-      offset,
-    } = req.query;
+    const { source, minScore, status, limit, offset } = req.query;
 
     const result = await getJobs({
       source: source as string | undefined,
@@ -127,7 +121,7 @@ router.get("/api/jobs/:id/report", async (req: Request, res: Response) => {
       title: job.title,
       company: job.company,
       description: job.description || "",
-      metadata: job.metadata as any,
+      metadata: job.metadata as unknown as ScrapedJobMetadata | null,
       salaryMin: job.salary_min,
       salaryMax: job.salary_max,
       location: job.location,
@@ -162,8 +156,8 @@ router.post("/api/jobs/:id/review", async (req: Request, res: Response) => {
       title: job.title,
       company: job.company,
       description: job.description || "",
-      metadata: job.metadata as any,
-      scoringReport: job.scoring_report as any,
+      metadata: job.metadata,
+      scoringReport: job.scoring_report,
       location: job.location,
       salaryMin: job.salary_min,
     });
@@ -197,8 +191,8 @@ router.post("/api/jobs/:id/cover-letter", async (req: Request, res: Response) =>
       title: job.title,
       company: job.company,
       description: job.description || "",
-      metadata: job.metadata as any,
-      scoringReport: job.scoring_report as any,
+      metadata: job.metadata,
+      scoringReport: job.scoring_report,
       location: job.location,
     });
 
@@ -321,26 +315,26 @@ router.post("/api/scrapers/:id/trigger", async (req: Request, res: Response) => 
 
     const runId = await createScoutRun();
     const searchConfig = await getSearchConfig();
-    const minScore = searchConfig.score_threshold
-      ? parseInt(searchConfig.score_threshold, 10)
-      : 70;
+    const minScore = searchConfig.score_threshold ? parseInt(searchConfig.score_threshold, 10) : 70;
 
     res.json({ message: `Triggered scraper "${scraper.name}"`, scraperId: id, runId });
 
-    runSingleScraper(scraper, runId, minScore).then(async ({ found, stored, skipped }) => {
-      await updateScoutRun(runId, {
-        completed_at: new Date().toISOString(),
-        total_jobs: found,
-        new_jobs: stored,
-        yc_jobs: scraper.type === "yc" ? found : 0,
-        linkedin_jobs: scraper.type === "linkedin" ? found : 0,
-        custom_jobs: scraper.type === "custom" ? found : 0,
-        status: "completed",
+    runSingleScraper(scraper, runId, minScore)
+      .then(async ({ found, stored }) => {
+        await updateScoutRun(runId, {
+          completed_at: new Date().toISOString(),
+          total_jobs: found,
+          new_jobs: stored,
+          yc_jobs: scraper.type === "yc" ? found : 0,
+          linkedin_jobs: scraper.type === "linkedin" ? found : 0,
+          custom_jobs: scraper.type === "custom" ? found : 0,
+          status: "completed",
+        });
+      })
+      .catch(async (err) => {
+        console.error(`Scraper trigger ${id} failed:`, err);
+        await updateScoutRun(runId, { completed_at: new Date().toISOString(), status: "failed" });
       });
-    }).catch(async (err) => {
-      console.error(`Scraper trigger ${id} failed:`, err);
-      await updateScoutRun(runId, { completed_at: new Date().toISOString(), status: "failed" });
-    });
   } catch (err) {
     console.error("POST /api/scrapers/:id/trigger error:", err);
     res.status(500).json({ error: "Failed to trigger scraper" });
@@ -354,9 +348,7 @@ router.post("/api/scrapers/trigger-all", async (_req: Request, res: Response) =>
 
     const runId = await createScoutRun();
     const searchConfig = await getSearchConfig();
-    const minScore = searchConfig.score_threshold
-      ? parseInt(searchConfig.score_threshold, 10)
-      : 70;
+    const minScore = searchConfig.score_threshold ? parseInt(searchConfig.score_threshold, 10) : 70;
 
     res.json({ message: `Triggered ${active.length} scrapers`, count: active.length, runId });
 
@@ -365,9 +357,15 @@ router.post("/api/scrapers/trigger-all", async (_req: Request, res: Response) =>
       .then(async (results) => {
         const total = results.reduce((a, r) => a + r.found, 0);
         const stored = results.reduce((a, r) => a + r.stored, 0);
-        const yc = results.filter((_, i) => active[i].type === "yc").reduce((a, r) => a + r.found, 0);
-        const li = results.filter((_, i) => active[i].type === "linkedin").reduce((a, r) => a + r.found, 0);
-        const custom = results.filter((_, i) => active[i].type === "custom").reduce((a, r) => a + r.found, 0);
+        const yc = results
+          .filter((_, i) => active[i].type === "yc")
+          .reduce((a, r) => a + r.found, 0);
+        const li = results
+          .filter((_, i) => active[i].type === "linkedin")
+          .reduce((a, r) => a + r.found, 0);
+        const custom = results
+          .filter((_, i) => active[i].type === "custom")
+          .reduce((a, r) => a + r.found, 0);
         await updateScoutRun(runId, {
           completed_at: new Date().toISOString(),
           total_jobs: total,
@@ -394,12 +392,12 @@ router.post("/api/scrapers/trigger-all", async (_req: Request, res: Response) =>
 
 // Map between dashboard camelCase and DB snake_case
 const CONFIG_MAP: Array<{ dash: string; db: string; type: "array" | "number" | "boolean" }> = [
-  { dash: "roleTitles",      db: "role_titles",      type: "array" },
+  { dash: "roleTitles", db: "role_titles", type: "array" },
   { dash: "excludeKeywords", db: "exclude_keywords", type: "array" },
-  { dash: "mustHave",        db: "must_have",        type: "array" },
-  { dash: "locations",       db: "locations",        type: "array" },
-  { dash: "minSalary",       db: "min_salary",       type: "number" },
-  { dash: "remoteOnly",      db: "remote_only",      type: "boolean" },
+  { dash: "mustHave", db: "must_have", type: "array" },
+  { dash: "locations", db: "locations", type: "array" },
+  { dash: "minSalary", db: "min_salary", type: "number" },
+  { dash: "remoteOnly", db: "remote_only", type: "boolean" },
 ];
 
 router.get("/api/search-config", async (_req: Request, res: Response) => {
@@ -414,7 +412,10 @@ router.get("/api/search-config", async (_req: Request, res: Response) => {
 
       switch (type) {
         case "array":
-          dash[dk] = val.split(",").map((s: string) => s.trim()).filter(Boolean);
+          dash[dk] = val
+            .split(",")
+            .map((s: string) => s.trim())
+            .filter(Boolean);
           break;
         case "number":
           dash[dk] = parseInt(val, 10) || 0;
@@ -470,7 +471,10 @@ router.put("/api/search-config", async (req: Request, res: Response) => {
       if (val === undefined || val === null) continue;
       switch (type) {
         case "array":
-          dash[dk] = val.split(",").map((s: string) => s.trim()).filter(Boolean);
+          dash[dk] = val
+            .split(",")
+            .map((s: string) => s.trim())
+            .filter(Boolean);
           break;
         case "number":
           dash[dk] = parseInt(val, 10) || 0;
@@ -549,13 +553,13 @@ router.post("/api/level-up/generate", async (_req: Request, res: Response) => {
         title: job.title,
         company: job.company,
         description: job.description || "",
-        metadata: (job as any).metadata,
-        scoringReport: (job as any).scoring_report,
+        metadata: job.metadata,
+        scoringReport: job.scoring_report,
         location: job.location,
-        salaryMin: (job as any).salary_min,
+        salaryMin: job.salary_min,
       });
 
-      for (const skill of (review.skills_to_learn || [])) {
+      for (const skill of review.skills_to_learn || []) {
         if (!skill.name || skill.name.length < 2) continue;
         await upsertLevelUpItem(skill.name, skill.category || "concept", Number(job.id));
         generated++;
@@ -573,10 +577,16 @@ router.post("/api/level-up/generate", async (_req: Request, res: Response) => {
 router.put("/api/level-up/:id", async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+    if (isNaN(id)) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
     const { notes } = req.body;
     const item = await updateLevelUpItem(id, { notes });
-    if (!item) { res.status(404).json({ error: "Item not found" }); return; }
+    if (!item) {
+      res.status(404).json({ error: "Item not found" });
+      return;
+    }
     res.json(item);
   } catch (err) {
     console.error("PUT /api/level-up/:id error:", err);
@@ -588,14 +598,23 @@ router.put("/api/level-up/:id", async (req: Request, res: Response) => {
 router.post("/api/level-up/:id/analyze", async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+    if (isNaN(id)) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
 
     const { userInput } = req.body;
-    if (!userInput) { res.status(400).json({ error: "userInput is required" }); return; }
+    if (!userInput) {
+      res.status(400).json({ error: "userInput is required" });
+      return;
+    }
 
     const items = await getLevelUpItems();
     const item = items.find((i) => Number(i.id) === id);
-    if (!item) { res.status(404).json({ error: "Item not found" }); return; }
+    if (!item) {
+      res.status(404).json({ error: "Item not found" });
+      return;
+    }
 
     const { loadResume, loadSoul, cfg: config } = await import("../config.js");
     const resume = loadResume();
@@ -657,7 +676,10 @@ Respond with ONLY a JSON object:
 router.post("/api/level-up/:id/resolve", async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+    if (isNaN(id)) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
     await updateLevelUpItem(id, { status: "mastered" });
     res.json({ success: true });
   } catch (err) {
@@ -668,9 +690,8 @@ router.post("/api/level-up/:id/resolve", async (req: Request, res: Response) => 
 
 router.post("/api/level-up/suggest-resume", async (_req: Request, res: Response) => {
   try {
-    const { loadResume, loadSoul } = await import("../config.js");
+    const { loadResume } = await import("../config.js");
     const resume = loadResume();
-    const soul = loadSoul();
     const items = await getLevelUpItems();
 
     const masteredSkills = items
@@ -753,10 +774,19 @@ async function runSingleScraper(
     console.log(`  ${scraper.name}: got ${jobs.length} jobs`);
 
     const { scoreAndStoreJobs } = await import("../agent/pipeline.js");
-    const result = await scoreAndStoreJobs(jobs, { runId, minScore, step: `scoring:${scraper.name}` });
+    const result = await scoreAndStoreJobs(jobs, {
+      runId,
+      minScore,
+      step: `scoring:${scraper.name}`,
+    });
 
     await updateScraperRun(scraper.id);
-    await logAudit(runId, step, "completed", `${scraper.name}: ${jobs.length} found, ${result.stored} stored (${result.skipped} < ${minScore})`);
+    await logAudit(
+      runId,
+      step,
+      "completed",
+      `${scraper.name}: ${jobs.length} found, ${result.stored} stored (${result.skipped} < ${minScore})`
+    );
     return { found: jobs.length, ...result };
   } catch (err) {
     const msg = (err as Error).message;

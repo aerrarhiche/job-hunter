@@ -6,16 +6,19 @@ import { pool } from "../db/client.js";
 
 let bot: TelegramBot | null = null;
 
-export function startBot(): TelegramBot {
+export function startBot(): TelegramBot | null {
   if (!cfg.telegram.botToken) {
     console.warn("Telegram bot token not set, skipping Telegram integration");
-    return null as any;
+    return null;
   }
 
   bot = new TelegramBot(cfg.telegram.botToken, { polling: true });
 
   bot.onText(/\/start/, (msg) => {
-    bot!.sendMessage(msg.chat.id, "Job Agent active. Daily brief at 7 AM.\n\nCommands:\n/brief — top matches\n/tailor <job_id> — tailor resume for a saved job\n/skip <job_id> — dismiss a job\n/tailor_url <url> — quick-score a job listing URL");
+    bot!.sendMessage(
+      msg.chat.id,
+      "Job Agent active. Daily brief at 7 AM.\n\nCommands:\n/brief — top matches\n/tailor <job_id> — tailor resume for a saved job\n/skip <job_id> — dismiss a job\n/tailor_url <url> — quick-score a job listing URL"
+    );
   });
 
   bot.onText(/\/brief/, async (msg) => {
@@ -66,16 +69,26 @@ export function startBot(): TelegramBot {
     bot!.sendMessage(chatId, `Fetching job from ${url}...`);
     try {
       const axios = (await import("axios")).default;
-      const { data } = await axios.get(url, { timeout: 15000, headers: { "User-Agent": "Mozilla/5.0" } });
+      const { data } = await axios.get(url, {
+        timeout: 15000,
+        headers: { "User-Agent": "Mozilla/5.0" },
+      });
       const html = typeof data === "string" ? data : JSON.stringify(data);
       // Extract title from HTML or JSON
       const titleMatch = html.match(/<title>(.+?)<\/title>/);
       const title = titleMatch ? titleMatch[1].replace(/\s*[-|].*$/, "").trim() : "Job from URL";
-      const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").substring(0, 4000);
-      
+      const text = html
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .substring(0, 4000);
+
       const { score, reason } = await scoreJob({ title, company: "Unknown", description: text });
-      
-      bot!.sendMessage(chatId, `Score: ${score}/100\n${reason}\n\nThis listing isn't saved. Use /brief for saved matches or /tailor <job_id> to tailor a saved job.`, { parse_mode: "Markdown" });
+
+      bot!.sendMessage(
+        chatId,
+        `Score: ${score}/100\n${reason}\n\nThis listing isn't saved. Use /brief for saved matches or /tailor <job_id> to tailor a saved job.`,
+        { parse_mode: "Markdown" }
+      );
     } catch (err) {
       bot!.sendMessage(chatId, `Failed: ${(err as Error).message}`);
     }

@@ -1,5 +1,7 @@
 # Job Agent
 
+[![CI](https://github.com/aerrarhiche/job-hunter/actions/workflows/ci.yml/badge.svg)](https://github.com/aerrarhiche/job-hunter/actions/workflows/ci.yml)
+
 An autonomous job-search agent that scrapes startup job boards, scores every
 listing against your resume and preferences using an LLM, and surfaces the best
 matches — with a daily Telegram brief and a live React dashboard.
@@ -69,14 +71,14 @@ audit logs so the dashboard can visualize a run as it happens.
 Jobs are scored 0–100 against `resume/master.md` and the preferences in
 `resume/soul.md`, across six weighted categories:
 
-| Category            | Max | Notes                                            |
-| ------------------- | :-: | ------------------------------------------------ |
-| Role match          | 30  | Target titles only; non-target roles capped low  |
-| Tech-stack overlap  | 25  | Match against your preferred stack               |
-| Company stage/size  | 15  | Seed/Series A preferred; enterprise penalized    |
-| Domain relevance    | 10  | Bonus for your target industries                 |
-| Remote policy       | 10  | Remote required; on-site/relocation penalized    |
-| Salary              | 10  | Floor enforced; bonus above target               |
+| Category           | Max | Notes                                           |
+| ------------------ | :-: | ----------------------------------------------- |
+| Role match         | 30  | Target titles only; non-target roles capped low |
+| Tech-stack overlap | 25  | Match against your preferred stack              |
+| Company stage/size | 15  | Seed/Series A preferred; enterprise penalized   |
+| Domain relevance   | 10  | Bonus for your target industries                |
+| Remote policy      | 10  | Remote required; on-site/relocation penalized   |
+| Salary             | 10  | Floor enforced; bonus above target              |
 
 Hard penalties (crypto, Go/Rust/Kafka/K8s-primary, on-site, EU-only, 10+ YOE,
 large enterprise, non-target roles) are re-applied **programmatically** in
@@ -149,13 +151,13 @@ Run the dashboard (in a second terminal) with a proxy pointed at the local API
 
 Useful scripts:
 
-| Script           | Description                                        |
-| ---------------- | -------------------------------------------------- |
-| `npm run dev`    | Watch-mode backend (tsx)                           |
-| `npm run build`  | Compile TypeScript to `dist/`                      |
-| `npm run scout`  | Run a single scout pass immediately, then exit     |
-| `npm run telegram` | Run just the Telegram bot                        |
-| `npm run db:migrate` | Apply `schema.sql`                              |
+| Script               | Description                                    |
+| -------------------- | ---------------------------------------------- |
+| `npm run dev`        | Watch-mode backend (tsx)                       |
+| `npm run build`      | Compile TypeScript to `dist/`                  |
+| `npm run scout`      | Run a single scout pass immediately, then exit |
+| `npm run telegram`   | Run just the Telegram bot                      |
+| `npm run db:migrate` | Apply `schema.sql`                             |
 
 ## Configuration
 
@@ -163,16 +165,16 @@ All configuration lives in environment variables (see `.env.example`). At
 runtime, search preferences are overridable from the dashboard and persisted in
 the `search_config` table.
 
-| Variable                  | Purpose                                            |
-| ------------------------- | -------------------------------------------------- |
-| `DEEPSEEK_API_KEY`        | LLM API key                                        |
-| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Daily brief + quick actions       |
-| `APIFY_TOKEN`             | LinkedIn scraping via Apify                        |
-| `YC_EMAIL` / `YC_PASSWORD`| Y Combinator login                                 |
-| `POSTGRES_*`              | Database connection                                |
-| `DAILY_RUN_HOUR` / `DAILY_RUN_MINUTE` | Cron schedule (UTC)                  |
-| `SEARCH_*`                | Role titles, keywords, locations, salary, threshold |
-| `API_PORT`                | Backend HTTP port (default `3000`)                 |
+| Variable                                  | Purpose                                             |
+| ----------------------------------------- | --------------------------------------------------- |
+| `DEEPSEEK_API_KEY`                        | LLM API key                                         |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Daily brief + quick actions                         |
+| `APIFY_TOKEN`                             | LinkedIn scraping via Apify                         |
+| `YC_EMAIL` / `YC_PASSWORD`                | Y Combinator login                                  |
+| `POSTGRES_*`                              | Database connection                                 |
+| `DAILY_RUN_HOUR` / `DAILY_RUN_MINUTE`     | Cron schedule (UTC)                                 |
+| `SEARCH_*`                                | Role titles, keywords, locations, salary, threshold |
+| `API_PORT`                                | Backend HTTP port (default `3000`)                  |
 
 ### Resume & preferences
 
@@ -189,32 +191,32 @@ See [`resume/README.md`](resume/README.md) for the exact formats.
 
 ## REST API
 
-| Method | Route                          | Description                              |
-| ------ | ------------------------------ | ---------------------------------------- |
-| GET    | `/api/stats`                   | Dashboard aggregate stats                |
-| GET    | `/api/jobs`                    | List/filter jobs (source, minScore, status) |
-| GET    | `/api/jobs/:id`                | Job detail + decision history            |
-| GET    | `/api/jobs/:id/report`         | Stored or freshly generated scoring report |
-| POST   | `/api/jobs/:id/review`         | Deep fit review                          |
-| POST   | `/api/jobs/:id/cover-letter`   | Generate a cover letter                  |
-| POST   | `/api/jobs/:id/decide`         | Record a decision (applied/skipped/…)    |
-| GET/PUT/POST/DELETE | `/api/scrapers…`       | Manage scrapers                          |
-| POST   | `/api/scrapers/:id/trigger`    | Run a single scraper                     |
-| POST   | `/api/scrapers/trigger-all`    | Run all active scrapers                  |
-| GET/PUT| `/api/search-config`           | Read/update search preferences           |
-| GET    | `/api/runs`                    | Scout-run history                        |
-| GET    | `/api/audit-logs`              | Live pipeline logs                       |
-| GET    | `/api/level-up`                | Skill-gap tracker items                  |
+| Method              | Route                        | Description                                 |
+| ------------------- | ---------------------------- | ------------------------------------------- |
+| GET                 | `/api/stats`                 | Dashboard aggregate stats                   |
+| GET                 | `/api/jobs`                  | List/filter jobs (source, minScore, status) |
+| GET                 | `/api/jobs/:id`              | Job detail + decision history               |
+| GET                 | `/api/jobs/:id/report`       | Stored or freshly generated scoring report  |
+| POST                | `/api/jobs/:id/review`       | Deep fit review                             |
+| POST                | `/api/jobs/:id/cover-letter` | Generate a cover letter                     |
+| POST                | `/api/jobs/:id/decide`       | Record a decision (applied/skipped/…)       |
+| GET/PUT/POST/DELETE | `/api/scrapers…`             | Manage scrapers                             |
+| POST                | `/api/scrapers/:id/trigger`  | Run a single scraper                        |
+| POST                | `/api/scrapers/trigger-all`  | Run all active scrapers                     |
+| GET/PUT             | `/api/search-config`         | Read/update search preferences              |
+| GET                 | `/api/runs`                  | Scout-run history                           |
+| GET                 | `/api/audit-logs`            | Live pipeline logs                          |
+| GET                 | `/api/level-up`              | Skill-gap tracker items                     |
 
 ## Telegram commands
 
-| Command                 | Action                                            |
-| ----------------------- | ------------------------------------------------- |
-| `/start`                | Show available commands                           |
-| `/brief`                | Send the current top matches                      |
-| `/tailor <job_id>`      | Tailor your resume for a saved job                |
-| `/skip <job_id>`        | Dismiss a job                                     |
-| `/tailor_url <url>`     | Quick-score an arbitrary job listing URL          |
+| Command             | Action                                   |
+| ------------------- | ---------------------------------------- |
+| `/start`            | Show available commands                  |
+| `/brief`            | Send the current top matches             |
+| `/tailor <job_id>`  | Tailor your resume for a saved job       |
+| `/skip <job_id>`    | Dismiss a job                            |
+| `/tailor_url <url>` | Quick-score an arbitrary job listing URL |
 
 ## Status & roadmap
 
