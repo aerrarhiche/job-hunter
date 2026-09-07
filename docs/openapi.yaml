@@ -1,0 +1,579 @@
+openapi: 3.1.0
+info:
+  title: Job Agent API
+  version: 1.0.0
+  description: |
+    REST API for the Job Agent control plane: scrape/scoring results, scraper
+    management, search configuration, learned preferences, and the results funnel.
+servers:
+  - url: http://localhost:3000
+    description: Local development
+tags:
+  - name: Health
+  - name: Stats
+  - name: Jobs
+  - name: Scrapers
+  - name: Config
+  - name: Analytics
+  - name: Level Up
+  - name: Runs
+
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      summary: Liveness/readiness probe with a database ping
+      responses:
+        "200":
+          description: Service and database are healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          description: Database unreachable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+
+  /api/stats:
+    get:
+      tags: [Stats]
+      summary: Aggregate dashboard statistics
+      responses:
+        "200":
+          description: Job counts, average score, and scraper health
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Stats"
+
+  /api/jobs:
+    get:
+      tags: [Jobs]
+      summary: List and filter scored jobs
+      parameters:
+        - name: source
+          in: query
+          schema: { type: string }
+        - name: minScore
+          in: query
+          schema: { type: integer }
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer }
+        - name: offset
+          in: query
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Paginated jobs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobsResponse"
+
+  /api/jobs/{id}:
+    get:
+      tags: [Jobs]
+      summary: Job detail including decision history
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: Job with decisions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobDetail"
+        "404":
+          description: Job not found
+
+  /api/jobs/{id}/report:
+    get:
+      tags: [Jobs]
+      summary: Stored or freshly generated scoring report
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: Scoring report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScoringReport"
+
+  /api/jobs/{id}/review:
+    post:
+      tags: [Jobs]
+      summary: Generate a deep fit review
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: Deep review
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeepReview"
+
+  /api/jobs/{id}/cover-letter:
+    post:
+      tags: [Jobs]
+      summary: Generate a tailored cover letter
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: Cover letter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CoverLetter"
+
+  /api/jobs/{id}/decide:
+    post:
+      tags: [Jobs]
+      summary: Record a decision and fold it into learned preferences
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DecisionRequest"
+      responses:
+        "200":
+          description: Decision recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  action: { type: string }
+
+  /api/scrapers:
+    get:
+      tags: [Scrapers]
+      summary: List all scrapers
+      responses:
+        "200":
+          description: Scrapers
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Scraper" }
+    post:
+      tags: [Scrapers]
+      summary: Create a custom scraper
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, url]
+              properties:
+                name: { type: string }
+                url: { type: string }
+                selectors: { type: object }
+      responses:
+        "201":
+          description: Created scraper
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Scraper"
+
+  /api/scrapers/{id}:
+    put:
+      tags: [Scrapers]
+      summary: Update a scraper
+      parameters:
+        - $ref: "#/components/parameters/ScraperId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                active: { type: boolean }
+                name: { type: string }
+                url: { type: string }
+                selectors: { type: object }
+      responses:
+        "200":
+          description: Updated scraper
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Scraper"
+    delete:
+      tags: [Scrapers]
+      summary: Delete a scraper
+      parameters:
+        - $ref: "#/components/parameters/ScraperId"
+      responses:
+        "200":
+          description: Deleted
+
+  /api/scrapers/{id}/trigger:
+    post:
+      tags: [Scrapers]
+      summary: Run a single scraper now
+      parameters:
+        - $ref: "#/components/parameters/ScraperId"
+      responses:
+        "200":
+          description: Run started
+
+  /api/scrapers/trigger-all:
+    post:
+      tags: [Scrapers]
+      summary: Run all active scrapers now
+      responses:
+        "200":
+          description: Run started
+
+  /api/search-config:
+    get:
+      tags: [Config]
+      summary: Read search preferences
+      responses:
+        "200":
+          description: Search configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchConfig"
+    put:
+      tags: [Config]
+      summary: Update search preferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchConfig"
+      responses:
+        "200":
+          description: Updated configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchConfig"
+
+  /api/preferences:
+    get:
+      tags: [Analytics]
+      summary: Learned preferences derived from user decisions
+      responses:
+        "200":
+          description: Preferences ordered by confidence
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Preference" }
+
+  /api/funnel:
+    get:
+      tags: [Analytics]
+      summary: Results funnel with conversion rates and per-source breakdown
+      responses:
+        "200":
+          description: Funnel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Funnel"
+
+  /api/runs:
+    get:
+      tags: [Runs]
+      summary: Scout-run history
+      responses:
+        "200":
+          description: Scout runs
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ScoutRun" }
+
+  /api/audit-logs:
+    get:
+      tags: [Runs]
+      summary: Live pipeline audit logs
+      parameters:
+        - name: runId
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Audit logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AuditLog" }
+
+  /api/level-up:
+    get:
+      tags: [Level Up]
+      summary: Skill-gap tracker items
+      responses:
+        "200":
+          description: Level-up items
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/LevelUpItem" }
+
+components:
+  parameters:
+    JobId:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer }
+    ScraperId:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer }
+
+  schemas:
+    Health:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        uptime:
+          type: number
+          description: Process uptime in seconds
+
+    Stats:
+      type: object
+      properties:
+        total: { type: integer }
+        avgScore: { type: number }
+        new: { type: integer }
+        applied: { type: integer }
+        skipped: { type: integer }
+        not_a_fit: { type: integer }
+        interviewing: { type: integer }
+        offered: { type: integer }
+        ycHealthy: { type: boolean }
+        linkedinHealthy: { type: boolean }
+        customHealthy: { type: boolean }
+
+    Job:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        company: { type: string }
+        location: { type: string, nullable: true }
+        url: { type: string }
+        source: { type: string }
+        salary_min: { type: integer, nullable: true }
+        salary_max: { type: integer, nullable: true }
+        score: { type: integer, nullable: true }
+        status: { type: string, nullable: true }
+        metadata: { type: object, nullable: true }
+
+    JobDetail:
+      allOf:
+        - $ref: "#/components/schemas/Job"
+        - type: object
+          properties:
+            description: { type: string, nullable: true }
+            score_reason: { type: string, nullable: true }
+            decisions:
+              type: array
+              items: { $ref: "#/components/schemas/Decision" }
+
+    JobsResponse:
+      type: object
+      properties:
+        jobs:
+          type: array
+          items: { $ref: "#/components/schemas/Job" }
+        total: { type: integer }
+
+    Decision:
+      type: object
+      properties:
+        id: { type: integer }
+        job_id: { type: integer }
+        action: { type: string }
+        notes: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    DecisionRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [applied, skipped, not_a_fit, interviewing, offered]
+        notes: { type: string }
+
+    ScoringReport:
+      type: object
+      properties:
+        overall_score: { type: integer }
+        summary: { type: string }
+        categories:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              score: { type: number }
+              max: { type: number }
+              explanation: { type: string }
+
+    DeepReview:
+      type: object
+      properties:
+        strengths:
+          type: array
+          items: { type: string }
+        gaps:
+          type: array
+          items: { type: string }
+        overall_fit:
+          type: string
+          enum: [strong, good, maybe, skip]
+        recommendation: { type: string }
+        key_talking_points:
+          type: array
+          items: { type: string }
+
+    CoverLetter:
+      type: object
+      properties:
+        subject: { type: string }
+        body: { type: string }
+        tone: { type: string }
+
+    Scraper:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        type:
+          type: string
+          enum: [yc, linkedin, custom]
+        url: { type: string, nullable: true }
+        active: { type: boolean }
+        last_run: { type: string, nullable: true }
+        last_error: { type: string, nullable: true }
+        selectors: { type: object, nullable: true }
+
+    SearchConfig:
+      type: object
+      properties:
+        roleTitles:
+          type: array
+          items: { type: string }
+        excludeKeywords:
+          type: array
+          items: { type: string }
+        mustHave:
+          type: array
+          items: { type: string }
+        locations:
+          type: array
+          items: { type: string }
+        minSalary: { type: number }
+        remoteOnly: { type: boolean }
+
+    Preference:
+      type: object
+      properties:
+        id: { type: integer }
+        key: { type: string }
+        value: { type: string }
+        learned_from: { type: string, nullable: true }
+        confidence: { type: number, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    Funnel:
+      type: object
+      properties:
+        scraped: { type: integer }
+        scored: { type: integer }
+        applied: { type: integer }
+        interviewing: { type: integer }
+        offered: { type: integer }
+        conversionRates:
+          type: object
+          properties:
+            scoredToApplied: { type: number }
+            appliedToInterviewing: { type: number }
+            interviewingToOffered: { type: number }
+        bySource:
+          type: array
+          items:
+            type: object
+            properties:
+              source: { type: string }
+              scraped: { type: integer }
+              applied: { type: integer }
+              interviewing: { type: integer }
+              offered: { type: integer }
+
+    ScoutRun:
+      type: object
+      properties:
+        id: { type: integer }
+        started_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time, nullable: true }
+        total_jobs: { type: integer }
+        new_jobs: { type: integer }
+        yc_jobs: { type: integer }
+        linkedin_jobs: { type: integer }
+        custom_jobs: { type: integer }
+        status: { type: string }
+
+    AuditLog:
+      type: object
+      properties:
+        id: { type: integer }
+        scout_run_id: { type: integer }
+        step: { type: string }
+        status:
+          type: string
+          enum: [running, completed, failed]
+        message: { type: string, nullable: true }
+        details: { type: object, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    LevelUpItem:
+      type: object
+      properties:
+        id: { type: integer }
+        skill_name: { type: string }
+        category: { type: string, nullable: true }
+        source_job_ids:
+          type: array
+          items: { type: integer }
+        status:
+          type: string
+          enum: [to_learn, learning, some_experience, competitor_mastery, mastered]
+        notes: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }

@@ -30,7 +30,13 @@ generalizes to any target role, stack, salary band, or industry.
 - **Telegram bot** — daily brief plus quick actions (`/tailor`, `/skip`,
   `/tailor_url`).
 - **React dashboard** — stats, sortable/filterable job table, live pipeline
-  view, scraper management, search config, and skill-gap tracking.
+  view, scraper management, search config, a results funnel, learned
+  preferences, and skill-gap tracking.
+- **Preference learning** — your decisions (applied / interviewing / offered)
+  teach the agent which sources, salary bands, roles, and company sizes you
+  actually prefer, with a confidence score per signal.
+- **Operability** — structured JSON logging (pino), a `GET /healthz` probe,
+  graceful shutdown, and CI that runs typecheck, lint, build, and tests.
 
 ## Architecture
 
@@ -111,6 +117,12 @@ job-agent/
 ├─ docker-compose.yml
 └─ .env.example
 ```
+
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md) — components, data flow, and a system diagram
+- [Architecture Decision Records](docs/adr/README.md) — the "why" behind key choices
+- [OpenAPI spec](docs/openapi.yaml) — the REST surface (OpenAPI 3.1)
 
 ## Getting started
 
@@ -193,7 +205,10 @@ See [`resume/README.md`](resume/README.md) for the exact formats.
 
 | Method              | Route                        | Description                                 |
 | ------------------- | ---------------------------- | ------------------------------------------- |
+| GET                 | `/healthz`                   | Health probe (pings the DB, returns uptime) |
 | GET                 | `/api/stats`                 | Dashboard aggregate stats                   |
+| GET                 | `/api/preferences`           | Learned preferences from your decisions     |
+| GET                 | `/api/funnel`                | Results funnel + conversion rates           |
 | GET                 | `/api/jobs`                  | List/filter jobs (source, minScore, status) |
 | GET                 | `/api/jobs/:id`              | Job detail + decision history               |
 | GET                 | `/api/jobs/:id/report`       | Stored or freshly generated scoring report  |
@@ -207,6 +222,26 @@ See [`resume/README.md`](resume/README.md) for the exact formats.
 | GET                 | `/api/runs`                  | Scout-run history                           |
 | GET                 | `/api/audit-logs`            | Live pipeline logs                          |
 | GET                 | `/api/level-up`              | Skill-gap tracker items                     |
+
+## Development
+
+Quality gates (run from the repo root):
+
+```bash
+npm run typecheck    # tsc --noEmit
+npm run lint         # eslint .
+npm run build        # tsc
+npm test             # vitest run
+npm run test:coverage
+npm run format:check # prettier --check .
+```
+
+Dashboard (separate package):
+
+```bash
+cd src/dashboard
+npm run build
+```
 
 ## Telegram commands
 
