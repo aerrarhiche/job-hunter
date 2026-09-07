@@ -17,7 +17,7 @@ import { scoreAndStoreJobs } from "./agent/pipeline.js";
 import { scrapeYC } from "./scrapers/yc.js";
 import { scrapeLinkedIn } from "./scrapers/linkedin.js";
 import { scrapeCustom } from "./scrapers/custom.js";
-import { checkTechCrunchFunding } from "./scrapers/crunchbase.js";
+import { checkTechCrunchFunding } from "./scrapers/techcrunch.js";
 import { startBot, sendDailyBrief } from "./telegram/bot.js";
 import { createServer } from "./api/server.js";
 import type { ScrapedJob } from "./scrapers/types.js";

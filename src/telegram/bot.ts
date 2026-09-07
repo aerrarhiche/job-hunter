@@ -15,7 +15,7 @@ export function startBot(): TelegramBot {
   bot = new TelegramBot(cfg.telegram.botToken, { polling: true });
 
   bot.onText(/\/start/, (msg) => {
-    bot!.sendMessage(msg.chat.id, "Job Agent active. Daily brief at 7 AM. Commands: /brief, /tailor <job_id>, /skip <job_id>");
+    bot!.sendMessage(msg.chat.id, "Job Agent active. Daily brief at 7 AM.\n\nCommands:\n/brief — top matches\n/tailor <job_id> — tailor resume for a saved job\n/skip <job_id> — dismiss a job\n/tailor_url <url> — quick-score a job listing URL");
   });
 
   bot.onText(/\/brief/, async (msg) => {
@@ -75,7 +75,7 @@ export function startBot(): TelegramBot {
       
       const { score, reason } = await scoreJob({ title, company: "Unknown", description: text });
       
-      bot!.sendMessage(chatId, `Score: ${score}/100\n${reason}\n\nUse /tailor_url_score to generate a tailored resume.`, { parse_mode: "Markdown" });
+      bot!.sendMessage(chatId, `Score: ${score}/100\n${reason}\n\nThis listing isn't saved. Use /brief for saved matches or /tailor <job_id> to tailor a saved job.`, { parse_mode: "Markdown" });
     } catch (err) {
       bot!.sendMessage(chatId, `Failed: ${(err as Error).message}`);
     }

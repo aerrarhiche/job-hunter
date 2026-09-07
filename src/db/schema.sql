@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   company       TEXT NOT NULL,
   location      TEXT,
   url           TEXT UNIQUE NOT NULL,
-  source        TEXT NOT NULL,          -- 'linkedin', 'yc', 'wellfound', 'crunchbase'
+  source        TEXT NOT NULL,          -- 'yc', 'linkedin', or a custom scraper's name
   description   TEXT,
   salary_min    INTEGER,
   salary_max    INTEGER,
