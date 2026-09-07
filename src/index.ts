@@ -6,7 +6,6 @@ import {
   getActiveScrapers,
   createScoutRun,
   updateScoutRun,
-  updateScraperRun,
   getSearchConfig,
   seedDefaults,
   insertAuditLog,
@@ -14,14 +13,11 @@ import {
 import { scoreAndStoreJobs } from "./agent/pipeline.js";
 import { filterJobs, dedupeJobs, type SearchConfig } from "./agent/filter.js";
 import { DEFAULT_API_PORT } from "./constants.js";
-import { scrapeYC } from "./scrapers/yc.js";
-import { scrapeLinkedIn } from "./scrapers/linkedin.js";
-import { scrapeCustom } from "./scrapers/custom.js";
+import { runScraper } from "./scout/run-scraper.js";
 import { checkTechCrunchFunding } from "./scrapers/techcrunch.js";
 import { startBot, sendDailyBrief } from "./telegram/bot.js";
 import { createServer } from "./api/server.js";
 import type { ScrapedJob } from "./scrapers/types.js";
-import type { ScraperRow } from "./db/client.js";
 
 // ---------------------------------------------------------------------------
 // Search config overrides from DB
@@ -49,43 +45,6 @@ async function loadSearchConfig(): Promise<SearchConfig> {
       : cfg.search.minScore,
     remoteOnly: dbConfig.remote_only ? dbConfig.remote_only === "true" : cfg.search.remoteOnly,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Run a single scraper and return its jobs
-// ---------------------------------------------------------------------------
-
-async function runScraper(scraper: ScraperRow, runId: number): Promise<ScrapedJob[]> {
-  const step = `scraper:${scraper.name}`;
-  await insertAuditLog(runId, step, "running", `Starting ${scraper.name}...`);
-
-  try {
-    let jobs: ScrapedJob[] = [];
-
-    switch (scraper.type) {
-      case "yc":
-        jobs = await scrapeYC(runId);
-        break;
-      case "linkedin":
-        jobs = await scrapeLinkedIn(runId);
-        break;
-      case "custom":
-        jobs = await scrapeCustom(scraper);
-        break;
-    }
-
-    await updateScraperRun(scraper.id);
-    await insertAuditLog(runId, step, "completed", `${scraper.name}: ${jobs.length} jobs found`, {
-      count: jobs.length,
-    });
-    return jobs;
-  } catch (err) {
-    const msg = (err as Error).message;
-    console.warn(`  ${scraper.name}: ${msg}`);
-    await updateScraperRun(scraper.id, msg);
-    await insertAuditLog(runId, step, "failed", msg);
-    return [];
-  }
 }
 
 // ---------------------------------------------------------------------------

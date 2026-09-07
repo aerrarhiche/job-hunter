@@ -1,12 +1,7 @@
-import OpenAI from "openai";
-import { cfg, loadResume, loadSoul } from "../config.js";
+import { loadResume, loadSoul } from "../config.js";
 import { researchCompany, formatResearchForPrompt } from "./research.js";
 import type { ScrapedJobMetadata } from "../scrapers/types.js";
-
-const client = new OpenAI({
-  apiKey: cfg.deepseek.apiKey,
-  baseURL: cfg.deepseek.baseUrl,
-});
+import { llm, type LlmClient } from "./llm.js";
 
 interface MetadataContext {
   ycBatch?: string;
@@ -104,7 +99,10 @@ function buildJobBlock(job: JobForScoring): string {
 
 // ── Pipeline scoring (quick, used during cron runs) ────────────────
 
-export async function scoreJob(job: JobForScoring): Promise<{ score: number; reason: string }> {
+export async function scoreJob(
+  job: JobForScoring,
+  client: LlmClient = llm
+): Promise<{ score: number; reason: string }> {
   const resume = loadResume();
   if (!resume) return { score: 50, reason: "No resume loaded" };
 
@@ -137,15 +135,9 @@ SCORING RULES:
 
 Respond with ONLY a JSON object: {"score": <number 0-100>, "reason": "<one-line explanation>"}`;
 
-  const response = await client.chat.completions.create({
-    model: cfg.deepseek.model,
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0.3,
-    max_tokens: 150,
-  });
+  const content = await client.complete({ prompt, temperature: 0.3, maxTokens: 150 });
 
   try {
-    const content = response.choices[0]?.message?.content || "{}";
     return JSON.parse(content.trim());
   } catch {
     return { score: 50, reason: "Failed to parse score" };
@@ -166,7 +158,10 @@ export interface ScoringReport {
   company_size?: string;
 }
 
-export async function generateScoringReport(job: JobForScoring): Promise<ScoringReport> {
+export async function generateScoringReport(
+  job: JobForScoring,
+  client: LlmClient = llm
+): Promise<ScoringReport> {
   const resume = loadResume();
   const soul = loadSoul();
 
@@ -224,15 +219,9 @@ Respond with ONLY a JSON object:
   "company_size": "<10" | "10-50" | "50-200" | "200+" | "unknown"
 }`;
 
-  const response = await client.chat.completions.create({
-    model: cfg.deepseek.model,
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0.3,
-    max_tokens: 1200,
-  });
+  const content = await client.complete({ prompt, temperature: 0.3, maxTokens: 1200 });
 
   try {
-    const content = response.choices[0]?.message?.content || "{}";
     const parsed = JSON.parse(content.trim());
     return {
       overall_score: parsed.overall_score ?? 50,
@@ -249,11 +238,14 @@ Respond with ONLY a JSON object:
   }
 }
 
-export async function tailorResume(job: {
-  title: string;
-  company: string;
-  description: string;
-}): Promise<{ tailored: string; summary: string }> {
+export async function tailorResume(
+  job: {
+    title: string;
+    company: string;
+    description: string;
+  },
+  client: LlmClient = llm
+): Promise<{ tailored: string; summary: string }> {
   const resume = loadResume();
   if (!resume) throw new Error("No resume loaded");
 
@@ -284,15 +276,9 @@ ${resume}
 
 Respond with ONLY a JSON object: {"tailored": "<full tailored resume in markdown>", "summary": "<what you changed and why>"}`;
 
-  const response = await client.chat.completions.create({
-    model: cfg.deepseek.model,
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0.4,
-    max_tokens: 3000,
-  });
+  const content = await client.complete({ prompt, temperature: 0.4, maxTokens: 3000 });
 
   try {
-    const content = response.choices[0]?.message?.content || "{}";
     return JSON.parse(content.trim());
   } catch {
     throw new Error("Failed to generate tailored resume");
@@ -310,15 +296,18 @@ export interface DeepReview {
   skills_to_learn?: Array<{ name: string; category: string }>;
 }
 
-export async function deepReview(job: {
-  title: string;
-  company: string;
-  description: string;
-  metadata?: Record<string, unknown> | null;
-  scoringReport?: Record<string, unknown> | null;
-  location?: string | null;
-  salaryMin?: number | null;
-}): Promise<DeepReview> {
+export async function deepReview(
+  job: {
+    title: string;
+    company: string;
+    description: string;
+    metadata?: Record<string, unknown> | null;
+    scoringReport?: Record<string, unknown> | null;
+    location?: string | null;
+    salaryMin?: number | null;
+  },
+  client: LlmClient = llm
+): Promise<DeepReview> {
   const resume = loadResume();
   if (!resume) throw new Error("No resume loaded");
 
@@ -382,15 +371,9 @@ Respond with ONLY a JSON object:
   ]
 }`;
 
-  const response = await client.chat.completions.create({
-    model: cfg.deepseek.model,
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0.4,
-    max_tokens: 1500,
-  });
+  const content = await client.complete({ prompt, temperature: 0.4, maxTokens: 1500 });
 
   try {
-    const content = response.choices[0]?.message?.content || "{}";
     return JSON.parse(content.trim());
   } catch {
     return {
@@ -411,14 +394,17 @@ export interface CoverLetter {
   tone: string;
 }
 
-export async function generateCoverLetter(job: {
-  title: string;
-  company: string;
-  description: string;
-  metadata?: Record<string, unknown> | null;
-  scoringReport?: Record<string, unknown> | null;
-  location?: string | null;
-}): Promise<CoverLetter> {
+export async function generateCoverLetter(
+  job: {
+    title: string;
+    company: string;
+    description: string;
+    metadata?: Record<string, unknown> | null;
+    scoringReport?: Record<string, unknown> | null;
+    location?: string | null;
+  },
+  client: LlmClient = llm
+): Promise<CoverLetter> {
   const resume = loadResume();
   if (!resume) throw new Error("No resume loaded");
 
@@ -466,15 +452,9 @@ Respond with ONLY a JSON object:
   "tone": "professional"
 }`;
 
-  const response = await client.chat.completions.create({
-    model: cfg.deepseek.model,
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0.3,
-    max_tokens: 1500,
-  });
+  const content = await client.complete({ prompt, temperature: 0.3, maxTokens: 1500 });
 
   try {
-    const content = response.choices[0]?.message?.content || "{}";
     return JSON.parse(content.trim());
   } catch {
     throw new Error("Failed to generate cover letter");

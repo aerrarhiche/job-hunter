@@ -13,7 +13,6 @@ import {
   getSearchConfig,
   upsertSearchConfig,
   getScoutRuns,
-  updateScraperRun,
   getAuditLogs,
   createScoutRun,
   updateScoutRun,
@@ -21,10 +20,8 @@ import {
   upsertLevelUpItem,
   updateLevelUpItem,
 } from "../db/client.js";
-import { scrapeYC } from "../scrapers/yc.js";
-import { scrapeLinkedIn } from "../scrapers/linkedin.js";
-import { scrapeCustom } from "../scrapers/custom.js";
 import { generateScoringReport, deepReview, generateCoverLetter } from "../agent/scorer.js";
+import { runSingleScraper } from "../scout/run-scraper.js";
 import type { ScrapedJobMetadata } from "../scrapers/types.js";
 
 const router = Router();
@@ -740,61 +737,5 @@ Respond with ONLY the updated resume markdown — no JSON wrapper, no explanatio
     res.status(500).json({ error: "Failed to generate resume suggestion" });
   }
 });
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-async function runSingleScraper(
-  scraper: import("../db/client.js").ScraperRow,
-  runId: number,
-  minScore: number
-): Promise<{ found: number; stored: number; skipped: number }> {
-  console.log(`Triggering scraper: ${scraper.name} (type=${scraper.type})`);
-
-  const step = `scraper:${scraper.name}`;
-  const { insertAuditLog: logAudit } = await import("../db/client.js");
-  await logAudit(runId, step, "running", `Starting ${scraper.name}...`);
-
-  try {
-    let jobs: import("../scrapers/types.js").ScrapedJob[] = [];
-
-    switch (scraper.type) {
-      case "yc":
-        jobs = await scrapeYC(runId);
-        break;
-      case "linkedin":
-        jobs = await scrapeLinkedIn(runId);
-        break;
-      case "custom":
-        jobs = await scrapeCustom(scraper);
-        break;
-    }
-
-    console.log(`  ${scraper.name}: got ${jobs.length} jobs`);
-
-    const { scoreAndStoreJobs } = await import("../agent/pipeline.js");
-    const result = await scoreAndStoreJobs(jobs, {
-      runId,
-      minScore,
-      step: `scoring:${scraper.name}`,
-    });
-
-    await updateScraperRun(scraper.id);
-    await logAudit(
-      runId,
-      step,
-      "completed",
-      `${scraper.name}: ${jobs.length} found, ${result.stored} stored (${result.skipped} < ${minScore})`
-    );
-    return { found: jobs.length, ...result };
-  } catch (err) {
-    const msg = (err as Error).message;
-    await updateScraperRun(scraper.id, msg);
-    await logAudit(runId, step, "failed", msg);
-    console.error(`  ${scraper.name}: failed – ${msg}`);
-    return { found: 0, stored: 0, skipped: 0 };
-  }
-}
 
 export { router };
